@@ -1,0 +1,25 @@
+appId: com.lightdo.app
+productName: LightDo
+directories:
+  buildResources: build
+  output: release
+files:
+  - dist/**/*
+  - package.json
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+portable:
+  artifactName: ${productName}-${version}-portable.exe
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LightDo
