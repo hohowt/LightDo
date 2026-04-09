@@ -17,6 +17,11 @@ enum DesktopSurfaceMode {
   floatingBall,
 }
 
+enum FloatingBallAnchorSide {
+  left,
+  right,
+}
+
 DesktopIntegration createDesktopIntegration() {
   if (Platform.isWindows || Platform.isMacOS) {
     return WindowsDesktopIntegration();
@@ -28,6 +33,8 @@ abstract class DesktopIntegration {
   const DesktopIntegration();
 
   ValueListenable<DesktopSurfaceMode> get modeListenable;
+
+  ValueListenable<FloatingBallAnchorSide> get anchorSideListenable;
 
   bool get supportsFloatingBallLauncher;
 
@@ -47,9 +54,15 @@ class NoopDesktopIntegration extends DesktopIntegration {
 
   final ValueNotifier<DesktopSurfaceMode> _modeNotifier =
       ValueNotifier(DesktopSurfaceMode.main);
+  final ValueNotifier<FloatingBallAnchorSide> _anchorSideNotifier =
+      ValueNotifier(FloatingBallAnchorSide.right);
 
   @override
   ValueListenable<DesktopSurfaceMode> get modeListenable => _modeNotifier;
+
+  @override
+  ValueListenable<FloatingBallAnchorSide> get anchorSideListenable =>
+      _anchorSideNotifier;
 
   @override
   bool get supportsFloatingBallLauncher => false;
@@ -74,8 +87,8 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
   WindowsDesktopIntegration();
 
   static const Size _floatingBallSize = Size(76, 76);
-  static const Size _mainWindowSize = Size(1180, 780);
-  static const Size _mainWindowMinSize = Size(900, 620);
+  static const Size _mainWindowSize = Size(420, 640);
+  static const Size _mainWindowMinSize = Size(360, 520);
   static const double _screenPadding = 28;
 
   final WindowManager _windowManager = windowManager;
@@ -83,6 +96,8 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
   final Menu _menu = Menu();
   final ValueNotifier<DesktopSurfaceMode> _modeNotifier =
       ValueNotifier(DesktopSurfaceMode.floatingBall);
+  final ValueNotifier<FloatingBallAnchorSide> _anchorSideNotifier =
+      ValueNotifier(FloatingBallAnchorSide.right);
   final HotKey _toggleHotKey = HotKey(
     key: PhysicalKeyboardKey.keyT,
     modifiers: [HotKeyModifier.alt, HotKeyModifier.shift],
@@ -95,6 +110,10 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
 
   @override
   ValueListenable<DesktopSurfaceMode> get modeListenable => _modeNotifier;
+
+  @override
+  ValueListenable<FloatingBallAnchorSide> get anchorSideListenable =>
+      _anchorSideNotifier;
 
   @override
   bool get supportsFloatingBallLauncher => true;
@@ -175,8 +194,7 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
     if (_modeNotifier.value != DesktopSurfaceMode.floatingBall) {
       return;
     }
-    final snapped = await _calculateFloatingBallBoundsFromCurrentPosition();
-    await _windowManager.setBounds(snapped);
+    await _updateAnchorSideFromCurrentPosition();
   }
 
   Future<void> toggleSurface() async {
@@ -191,7 +209,10 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
   Future<void> showMainWindow() async {
     final bounds = await _calculateMainWindowBounds();
     await _windowManager.setBackgroundColor(const Color(0xFFF4F1E8));
-    await _windowManager.setTitleBarStyle(TitleBarStyle.normal);
+    await _windowManager.setTitleBarStyle(
+      TitleBarStyle.hidden,
+      windowButtonVisibility: false,
+    );
     await _windowManager.setResizable(true);
     await _windowManager.setMinimumSize(_mainWindowMinSize);
     await _windowManager.setBounds(bounds);
@@ -220,6 +241,7 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
     await _windowManager.setSkipTaskbar(true);
     await _windowManager.show();
     await _windowManager.focus();
+    await _updateAnchorSideFromCurrentPosition();
     _modeNotifier.value = DesktopSurfaceMode.floatingBall;
     if (Platform.isWindows) {
       await _syncTrayMenu();
@@ -360,23 +382,16 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
     );
   }
 
-  Future<Rect> _calculateFloatingBallBoundsFromCurrentPosition() async {
+  Future<void> _updateAnchorSideFromCurrentPosition() async {
     final position = await _windowManager.getPosition();
     final display = await screenRetriever.getPrimaryDisplay();
     final visiblePosition = display.visiblePosition ?? Offset.zero;
     final visibleSize = display.visibleSize ?? display.size;
-    final leftEdge = visiblePosition.dx + _screenPadding;
-    final rightEdge =
-        visiblePosition.dx + visibleSize.width - _floatingBallSize.width - _screenPadding;
-    final topEdge = visiblePosition.dy + _screenPadding;
-    final bottomEdge =
-        visiblePosition.dy + visibleSize.height - _floatingBallSize.height - _screenPadding;
-
-    final snapToRight = (rightEdge - position.dx).abs() <=
-        (position.dx - leftEdge).abs();
-    final x = snapToRight ? rightEdge : leftEdge;
-    final y = position.dy.clamp(topEdge, bottomEdge).toDouble();
-    return Rect.fromLTWH(x, y, _floatingBallSize.width, _floatingBallSize.height);
+    final centerX = position.dx + _floatingBallSize.width / 2;
+    final screenMidX = visiblePosition.dx + visibleSize.width / 2;
+    _anchorSideNotifier.value = centerX >= screenMidX
+        ? FloatingBallAnchorSide.right
+        : FloatingBallAnchorSide.left;
   }
 
   Future<Rect> _calculateMainWindowBounds() async {
@@ -386,7 +401,16 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
 
     if (_modeNotifier.value == DesktopSurfaceMode.floatingBall) {
       final position = await _windowManager.getPosition();
-      final left = (position.dx + _floatingBallSize.width - _mainWindowSize.width)
+      final anchorSide = position.dx + _floatingBallSize.width / 2 >=
+              visiblePosition.dx + visibleSize.width / 2
+          ? FloatingBallAnchorSide.right
+          : FloatingBallAnchorSide.left;
+      _anchorSideNotifier.value = anchorSide;
+      const overlap = 28.0;
+      final rawLeft = anchorSide == FloatingBallAnchorSide.right
+          ? position.dx + _floatingBallSize.width - overlap - _mainWindowSize.width
+          : position.dx - _floatingBallSize.width + overlap;
+      final left = rawLeft
           .clamp(
             visiblePosition.dx + _screenPadding,
             visiblePosition.dx +
@@ -395,7 +419,7 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
                 _screenPadding,
           )
           .toDouble();
-      final top = (position.dy + _floatingBallSize.height + 12)
+      final top = (position.dy - 18)
           .clamp(
             visiblePosition.dy + _screenPadding,
             visiblePosition.dy +
