@@ -20,5 +20,18 @@ class MainFlutterWindow: BitsdojoWindow {
     }
 
     super.awakeFromNib()
+
+    self.styleMask.insert(.fullSizeContentView)
+    self.titlebarAppearsTransparent = true
+    self.titleVisibility = .hidden
+    self.isOpaque = false
+    self.hasShadow = false
+    self.backgroundColor = NSColor.clear
+
+    if let contentView = self.contentView {
+      contentView.wantsLayer = true
+      contentView.layer?.cornerRadius = 38
+      contentView.layer?.masksToBounds = true
+    }
   }
 }

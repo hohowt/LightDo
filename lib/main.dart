@@ -90,10 +90,8 @@ Future<void> _configureDesktopWindow(LightDoWindowRole role) async {
           backgroundColor: Colors.transparent,
           alwaysOnTop: true,
           skipTaskbar: true,
-          titleBarStyle: Platform.isMacOS
-              ? TitleBarStyle.normal
-              : TitleBarStyle.hidden,
-          windowButtonVisibility: !Platform.isMacOS,
+          titleBarStyle: TitleBarStyle.hidden,
+          windowButtonVisibility: false,
         )
       : const WindowOptions(
           size: Size(420, 640),

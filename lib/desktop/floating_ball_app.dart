@@ -22,6 +22,14 @@ class FloatingBallApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        scaffoldBackgroundColor: Colors.transparent,
+        canvasColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+      ),
       home: FloatingBallHome(ballWindowId: ballWindowId),
     );
   }
@@ -337,9 +345,9 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Center(
+    return Material(
+      type: MaterialType.transparency,
+      child: Center(
         child: DragToMoveArea(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
