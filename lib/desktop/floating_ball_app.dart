@@ -63,6 +63,11 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   bool _trayReady = false;
   bool _hotKeyEnabled = true;
   bool _launchAtStartupEnabled = false;
+  bool _coveredByMain = false;
+  bool _flashPhase = false;
+  DateTime? _activeReminderUntil;
+  Timer? _reminderPollTimer;
+  Timer? _flashTimer;
 
   @override
   void initState() {
@@ -74,6 +79,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   void dispose() {
     windowManager.removeListener(this);
     unawaited(hotKeyManager.unregisterAll());
+    _reminderPollTimer?.cancel();
+    _flashTimer?.cancel();
     if (_trayReady && Platform.isWindows) {
       unawaited(_systemTray.destroy());
     }
@@ -92,6 +99,11 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
               (call.arguments as Map?)?.cast<String, dynamic>() ??
               const <String, dynamic>{};
           final coveredByMain = arguments['coveredByMain'] as bool? ?? false;
+          if (mounted) {
+            setState(() {
+              _coveredByMain = coveredByMain;
+            });
+          }
           await windowManager.setAlwaysOnTop(!coveredByMain);
           if (!coveredByMain) {
             await windowManager.show();
@@ -104,6 +116,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     windowManager.addListener(this);
     await _prepareFloatingBallWindow();
     await _loadSettings();
+    _startReminderMonitoring();
     unawaited(_warmUpEditorWindow());
     if (Platform.isWindows) {
       await _setupTray();
@@ -159,6 +172,71 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     _launchAtStartupEnabled = snapshot.settings.launchAtStartup;
     await _syncLaunchAtStartup();
     await _syncHotKey();
+  }
+
+  void _startReminderMonitoring() {
+    _reminderPollTimer?.cancel();
+    _flashTimer?.cancel();
+    _reminderPollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      unawaited(_refreshReminderState());
+    });
+    _flashTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      final reminderActive = _isReminderActive;
+      if (!mounted) {
+        return;
+      }
+      if (!reminderActive) {
+        if (_flashPhase) {
+          setState(() {
+            _flashPhase = false;
+          });
+        }
+        return;
+      }
+      setState(() {
+        _flashPhase = !_flashPhase;
+      });
+    });
+    unawaited(_refreshReminderState());
+  }
+
+  Future<void> _refreshReminderState() async {
+    try {
+      final snapshot = await _storage.load();
+      final now = DateTime.now();
+      DateTime? reminderUntil;
+      for (final todo in snapshot.todos) {
+        if (!todo.shouldFlashReminderAt(now)) {
+          continue;
+        }
+        final endsAt = todo.reminderEndsAt();
+        if (endsAt == null) {
+          continue;
+        }
+        if (reminderUntil == null || endsAt.isAfter(reminderUntil)) {
+          reminderUntil = endsAt;
+        }
+      }
+      if (!mounted) {
+        return;
+      }
+      final changed =
+          (reminderUntil == null && _activeReminderUntil != null) ||
+          (reminderUntil != null &&
+              (_activeReminderUntil == null ||
+                  !_activeReminderUntil!.isAtSameMomentAs(reminderUntil)));
+      if (!changed) {
+        return;
+      }
+      setState(() {
+        _activeReminderUntil = reminderUntil;
+        if (reminderUntil == null) {
+          _flashPhase = false;
+        }
+      });
+    } catch (_) {
+      return;
+    }
   }
 
   Future<void> _syncLaunchAtStartup() async {
@@ -345,6 +423,18 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
 
   @override
   Widget build(BuildContext context) {
+    final reminderActive = _isReminderActive;
+    final gradientColors = _ballGradientColors(
+      reminderActive: reminderActive,
+      coveredByMain: _coveredByMain,
+      flashPhase: _flashPhase,
+    );
+    final borderColor = reminderActive && _flashPhase
+        ? const Color(0xFFFFF1C8)
+        : _coveredByMain
+        ? const Color(0xFFF6E3A2)
+        : Colors.white.withValues(alpha: 0.82);
+
     return Material(
       type: MaterialType.transparency,
       child: Center(
@@ -359,15 +449,12 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
               height: 76,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: const LinearGradient(
+                gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xD91A7A68), Color(0xD93CA692)],
+                  colors: gradientColors,
                 ),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.82),
-                  width: 2,
-                ),
+                border: Border.all(color: borderColor, width: 2),
                 boxShadow: [
                   BoxShadow(
                     color: const Color(0xFF1D6F5F).withValues(alpha: 0.18),
@@ -386,5 +473,23 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
         ),
       ),
     );
+  }
+
+  bool get _isReminderActive =>
+      _activeReminderUntil != null &&
+      DateTime.now().isBefore(_activeReminderUntil!);
+
+  List<Color> _ballGradientColors({
+    required bool reminderActive,
+    required bool coveredByMain,
+    required bool flashPhase,
+  }) {
+    if (reminderActive && flashPhase) {
+      return const [Color(0xFFE46048), Color(0xFFF6A85E)];
+    }
+    if (coveredByMain) {
+      return const [Color(0xFFD4AF4F), Color(0xFF91B64F)];
+    }
+    return const [Color(0xD91A7A68), Color(0xD93CA692)];
   }
 }
