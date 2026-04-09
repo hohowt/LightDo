@@ -22,13 +22,24 @@ Future<void> _configureDesktopWindow() async {
   }
 
   await windowManager.ensureInitialized();
-  const options = WindowOptions(
-    size: Size(1180, 780),
-    minimumSize: Size(900, 620),
-    center: true,
-    title: 'LightDo',
-    backgroundColor: Colors.transparent,
-  );
+  final options = Platform.isWindows
+      ? const WindowOptions(
+          size: Size(76, 76),
+          minimumSize: Size(76, 76),
+          center: false,
+          title: 'LightDo',
+          backgroundColor: Colors.transparent,
+          skipTaskbar: true,
+          titleBarStyle: TitleBarStyle.hidden,
+          windowButtonVisibility: false,
+        )
+      : const WindowOptions(
+          size: Size(1180, 780),
+          minimumSize: Size(900, 620),
+          center: true,
+          title: 'LightDo',
+          backgroundColor: Color(0xFFF4F1E8),
+        );
   await windowManager.waitUntilReadyToShow(options, () async {
     await windowManager.show();
     await windowManager.focus();
@@ -53,7 +64,6 @@ class LightDoApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         scaffoldBackgroundColor: const Color(0xFFF4F1E8),
-        fontFamily: 'SF Pro Display',
       ),
       home: LightDoHomePage(
         storage: storage ?? const FileLightDoStorage(),
@@ -90,6 +100,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   @override
   void initState() {
     super.initState();
+    widget.desktopIntegration.modeListenable.addListener(_handleSurfaceModeChanged);
     _loadSnapshot();
   }
 
@@ -97,8 +108,16 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   void dispose() {
     _saveTimer?.cancel();
     _inputController.dispose();
+    widget.desktopIntegration.modeListenable.removeListener(_handleSurfaceModeChanged);
     unawaited(widget.desktopIntegration.dispose());
     super.dispose();
+  }
+
+  void _handleSurfaceModeChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   Future<void> _loadSnapshot() async {
@@ -314,6 +333,13 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final surfaceMode = widget.desktopIntegration.modeListenable.value;
+    if (surfaceMode == DesktopSurfaceMode.floatingBall) {
+      return _FloatingBallSurface(
+        onOpen: () => widget.desktopIntegration.showMainWindow(),
+      );
+    }
+
     final activeTodos = _activeTodos;
     final completedTodos = _completedTodos;
     final completedRate = _todos.isEmpty ? 0 : ((completedTodos.length / _todos.length) * 100).round();
@@ -849,8 +875,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ),
               SwitchListTile(
                 value: _draft.minimizeToTrayOnClose,
-                title: const Text('关闭时隐藏到托盘'),
-                subtitle: const Text('点击关闭按钮后不退出，只隐藏到系统托盘。'),
+                title: const Text('关闭时回到悬浮球'),
+                subtitle: const Text('点击关闭按钮后不退出，收起为桌面悬浮球入口。'),
                 onChanged: (value) {
                   setState(() {
                     _draft = _draft.copyWith(minimizeToTrayOnClose: value);
@@ -927,6 +953,73 @@ class _StatPill extends StatelessWidget {
                 ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FloatingBallSurface extends StatelessWidget {
+  const _FloatingBallSurface({required this.onOpen});
+
+  final Future<void> Function() onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Center(
+        child: DragToMoveArea(
+          child: GestureDetector(
+            onTap: () {
+              unawaited(onOpen());
+            },
+            child: Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xCC1A7A68),
+                    Color(0xCC3CA692),
+                  ],
+                ),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.78),
+                  width: 2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF1D6F5F).withValues(alpha: 0.28),
+                    blurRadius: 24,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.checklist_rounded,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Do',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
