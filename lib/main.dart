@@ -20,9 +20,7 @@ Future<void> main([List<String> args = const []]) async {
 
   if (launchContext.arguments.role == LightDoWindowRole.floatingBall) {
     runApp(
-      FloatingBallApp(
-        mainWindowId: launchContext.arguments.mainWindowId ?? '',
-      ),
+      FloatingBallApp(mainWindowId: launchContext.arguments.mainWindowId ?? ''),
     );
     return;
   }
@@ -91,10 +89,7 @@ Future<void> _configureDesktopWindow(LightDoWindowRole role) async {
 }
 
 class _LaunchContext {
-  const _LaunchContext({
-    required this.controller,
-    required this.arguments,
-  });
+  const _LaunchContext({required this.controller, required this.arguments});
 
   final WindowController? controller;
   final LightDoWindowArguments arguments;
@@ -200,9 +195,11 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
       if (!mounted) {
         return;
       }
-      setState(() {
-        _errorMessage = 'Windows 桌面能力初始化失败，核心待办功能仍可使用。';
-      });
+      if (!Platform.isMacOS) {
+        setState(() {
+          _errorMessage = '桌面能力初始化失败，核心待办功能仍可使用。';
+        });
+      }
     }
   }
 
@@ -246,7 +243,10 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   void _toggleTodo(String id, bool selected) {
     setState(() {
       _todos = _todos
-          .map((todo) => todo.id == id ? todo.copyWith(isCompleted: selected) : todo)
+          .map(
+            (todo) =>
+                todo.id == id ? todo.copyWith(isCompleted: selected) : todo,
+          )
           .toList(growable: false);
     });
     _scheduleSave();
@@ -274,7 +274,8 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
               child: const Text('取消'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+              onPressed: () =>
+                  Navigator.of(context).pop(controller.text.trim()),
               child: const Text('保存'),
             ),
           ],
@@ -288,7 +289,9 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     }
     setState(() {
       _todos = _todos
-          .map((item) => item.id == todo.id ? item.copyWith(title: trimmed) : item)
+          .map(
+            (item) => item.id == todo.id ? item.copyWith(title: trimmed) : item,
+          )
           .toList(growable: false);
     });
     _scheduleSave();
@@ -303,7 +306,8 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
 
   Future<void> _clearCompleted() async {
     if (_settings.confirmBeforeClearingCompleted) {
-      final shouldClear = await showDialog<bool>(
+      final shouldClear =
+          await showDialog<bool>(
             context: context,
             builder: (context) {
               return AlertDialog(
@@ -329,7 +333,9 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     }
 
     setState(() {
-      _todos = _todos.where((todo) => !todo.isCompleted).toList(growable: false);
+      _todos = _todos
+          .where((todo) => !todo.isCompleted)
+          .toList(growable: false);
     });
     _scheduleSave();
   }
@@ -364,9 +370,11 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
       if (!mounted) {
         return;
       }
-      setState(() {
-        _errorMessage = 'Windows 设置应用失败，已保留当前任务数据。';
-      });
+      if (!Platform.isMacOS) {
+        setState(() {
+          _errorMessage = '桌面设置应用失败，已保留当前任务数据。';
+        });
+      }
     }
   }
 
@@ -380,7 +388,9 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   Widget build(BuildContext context) {
     final activeTodos = _activeTodos;
     final completedTodos = _completedTodos;
-    final completedRate = _todos.isEmpty ? 0 : ((completedTodos.length / _todos.length) * 100).round();
+    final completedRate = _todos.isEmpty
+        ? 0
+        : ((completedTodos.length / _todos.length) * 100).round();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F4ED),
@@ -437,22 +447,24 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                               key: ValueKey(todo.id),
                                               todo: todo,
                                               compact: _settings.compactMode,
-                                              onToggle: (selected) => _toggleTodo(
-                                                todo.id,
-                                                selected,
-                                              ),
+                                              onToggle: (selected) =>
+                                                  _toggleTodo(
+                                                    todo.id,
+                                                    selected,
+                                                  ),
                                               onEdit: () => _editTodo(todo),
                                               onDelete: () =>
                                                   _deleteTodo(todo.id),
                                               handle:
                                                   ReorderableDragStartListener(
-                                                index: index,
-                                                child: const Icon(
-                                                  Icons.drag_indicator_rounded,
-                                                  color: Color(0xFF7B8A83),
-                                                  size: 18,
-                                                ),
-                                              ),
+                                                    index: index,
+                                                    child: const Icon(
+                                                      Icons
+                                                          .drag_indicator_rounded,
+                                                      color: Color(0xFF7B8A83),
+                                                      size: 18,
+                                                    ),
+                                                  ),
                                             );
                                           },
                                         ),
@@ -460,8 +472,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                 const SizedBox(height: 16),
                                 _CompletedPanel(
                                   completedTodos: completedTodos,
-                                  expanded:
-                                      _settings.expandCompletedByDefault,
+                                  expanded: _settings.expandCompletedByDefault,
                                   compact: _settings.compactMode,
                                   onToggleExpanded: (value) => _updateSettings(
                                     _settings.copyWith(
@@ -474,8 +485,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                   onToggleTodo: (todo, selected) =>
                                       _toggleTodo(todo.id, selected),
                                   onEditTodo: _editTodo,
-                                  onDeleteTodo: (todo) =>
-                                      _deleteTodo(todo.id),
+                                  onDeleteTodo: (todo) => _deleteTodo(todo.id),
                                 ),
                               ],
                             ),
@@ -530,16 +540,16 @@ class _HeaderSection extends StatelessWidget {
               Text(
                 'LightDo',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: const Color(0xFF1C2F2A),
-                    ),
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF1C2F2A),
+                ),
               ),
               const SizedBox(height: 4),
               Text(
                 '总计 $totalCount 项，进行中 $activeCount 项，已完成 $completedCount 项，完成率 $completedRate%',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xFF75817D),
-                    ),
+                  color: const Color(0xFF75817D),
+                ),
               ),
             ],
           ),
@@ -560,9 +570,9 @@ class _HeaderSection extends StatelessWidget {
             child: Text(
               'Desktop',
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: const Color(0xFF4D5B56),
-                    fontWeight: FontWeight.w700,
-                  ),
+                color: const Color(0xFF4D5B56),
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
       ],
@@ -571,10 +581,7 @@ class _HeaderSection extends StatelessWidget {
 }
 
 class _ComposerCard extends StatelessWidget {
-  const _ComposerCard({
-    required this.controller,
-    required this.onSubmit,
-  });
+  const _ComposerCard({required this.controller, required this.onSubmit});
 
   final TextEditingController controller;
   final VoidCallback onSubmit;
@@ -584,18 +591,13 @@ class _ComposerCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.only(bottom: 8),
       decoration: const BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFD9DED4)),
-        ),
+        border: Border(bottom: BorderSide(color: Color(0xFFD9DED4))),
       ),
       child: Row(
         children: [
           const Padding(
             padding: EdgeInsets.only(right: 10),
-            child: Icon(
-              Icons.add_rounded,
-              color: Color(0xFF6C7A74),
-            ),
+            child: Icon(Icons.add_rounded, color: Color(0xFF6C7A74)),
           ),
           Expanded(
             child: TextField(
@@ -611,10 +613,7 @@ class _ComposerCard extends StatelessWidget {
               ),
             ),
           ),
-          TextButton(
-            onPressed: onSubmit,
-            child: const Text('添加'),
-          ),
+          TextButton(onPressed: onSubmit, child: const Text('添加')),
         ],
       ),
     );
@@ -642,16 +641,16 @@ class _TaskPanel extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: const Color(0xFF173C35),
-                ),
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF173C35),
+            ),
           ),
           const SizedBox(height: 6),
           Text(
             subtitle,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF78847F),
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF78847F)),
           ),
           const SizedBox(height: 14),
           Expanded(child: child),
@@ -687,9 +686,7 @@ class _CompletedPanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.only(top: 14),
       decoration: const BoxDecoration(
-        border: Border(
-          top: BorderSide(color: Color(0xFFE2E5DD)),
-        ),
+        border: Border(top: BorderSide(color: Color(0xFFE2E5DD))),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -703,16 +700,16 @@ class _CompletedPanel extends StatelessWidget {
                     Text(
                       '已完成',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFF33413D),
-                          ),
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF33413D),
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       '${completedTodos.length} 项',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: const Color(0xFF7A8580),
-                          ),
+                        color: const Color(0xFF7A8580),
+                      ),
                     ),
                   ],
                 ),
@@ -720,7 +717,9 @@ class _CompletedPanel extends StatelessWidget {
               IconButton(
                 onPressed: () => onToggleExpanded(!expanded),
                 icon: Icon(
-                  expanded ? Icons.unfold_less_rounded : Icons.unfold_more_rounded,
+                  expanded
+                      ? Icons.unfold_less_rounded
+                      : Icons.unfold_more_rounded,
                 ),
                 tooltip: expanded ? '折叠' : '展开',
               ),
@@ -782,11 +781,13 @@ class _TodoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
-          fontWeight: FontWeight.w600,
-          height: 1.25,
-          color: todo.isCompleted ? const Color(0xFF6F837D) : const Color(0xFF203B35),
-          decoration: todo.isCompleted ? TextDecoration.lineThrough : null,
-        );
+      fontWeight: FontWeight.w600,
+      height: 1.25,
+      color: todo.isCompleted
+          ? const Color(0xFF6F837D)
+          : const Color(0xFF203B35),
+      decoration: todo.isCompleted ? TextDecoration.lineThrough : null,
+    );
 
     return Container(
       decoration: BoxDecoration(
@@ -800,10 +801,7 @@ class _TodoCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          if (handle != null) ...[
-            handle!,
-            const SizedBox(width: 8),
-          ],
+          if (handle != null) ...[handle!, const SizedBox(width: 8)],
           Checkbox(
             value: todo.isCompleted,
             onChanged: (value) => onToggle(value ?? false),
@@ -817,8 +815,8 @@ class _TodoCard extends StatelessWidget {
                 Text(
                   todo.summary,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF728781),
-                      ),
+                    color: const Color(0xFF728781),
+                  ),
                 ),
               ],
             ),
@@ -851,91 +849,70 @@ class _SettingsDialog extends StatefulWidget {
 class _SettingsDialogState extends State<_SettingsDialog> {
   late AppSettings _draft = widget.settings;
 
+  bool get _showDesktopSection => Platform.isWindows || Platform.isMacOS;
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('设置'),
       content: SizedBox(
         width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SwitchListTile(
-              value: _draft.expandCompletedByDefault,
-              title: const Text('默认展开已完成区域'),
-              subtitle: const Text('控制已完成任务区是否默认展开。'),
-              onChanged: (value) {
-                setState(() {
-                  _draft = _draft.copyWith(expandCompletedByDefault: value);
-                });
-              },
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 340),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_showDesktopSection) ...[
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _draft.minimizeToTrayOnClose,
+                    title: const Text('关闭时回到悬浮球'),
+                    subtitle: const Text('关闭主界面后收起到桌面小球。'),
+                    onChanged: (value) {
+                      setState(() {
+                        _draft = _draft.copyWith(minimizeToTrayOnClose: value);
+                      });
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _draft.enableGlobalHotkey,
+                    title: const Text('启用全局快捷键 Alt+Shift+T'),
+                    subtitle: const Text('快速显示主界面。'),
+                    onChanged: (value) {
+                      setState(() {
+                        _draft = _draft.copyWith(enableGlobalHotkey: value);
+                      });
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _draft.alwaysOnTop,
+                    title: const Text('主界面置顶'),
+                    subtitle: const Text('展开后保持在其他窗口前面。'),
+                    onChanged: (value) {
+                      setState(() {
+                        _draft = _draft.copyWith(alwaysOnTop: value);
+                      });
+                    },
+                  ),
+                  if (Platform.isWindows)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _draft.launchAtStartup,
+                      title: const Text('开机自启'),
+                      subtitle: const Text('登录系统后自动启动 LightDo。'),
+                      onChanged: (value) {
+                        setState(() {
+                          _draft = _draft.copyWith(launchAtStartup: value);
+                        });
+                      },
+                    ),
+                ],
+              ],
             ),
-            SwitchListTile(
-              value: _draft.confirmBeforeClearingCompleted,
-              title: const Text('清空已完成前弹出确认'),
-              subtitle: const Text('避免误删已完成任务。'),
-              onChanged: (value) {
-                setState(() {
-                  _draft = _draft.copyWith(
-                    confirmBeforeClearingCompleted: value,
-                  );
-                });
-              },
-            ),
-            SwitchListTile(
-              value: _draft.compactMode,
-              title: const Text('紧凑显示'),
-              subtitle: const Text('减小列表项间距，适合窄窗口。'),
-              onChanged: (value) {
-                setState(() {
-                  _draft = _draft.copyWith(compactMode: value);
-                });
-              },
-            ),
-            if (Platform.isWindows || Platform.isMacOS) ...[
-              const Divider(height: 8),
-              SwitchListTile(
-                value: _draft.alwaysOnTop,
-                title: const Text('窗口始终置顶'),
-                subtitle: const Text('保持窗口在其他应用前方显示。'),
-                onChanged: (value) {
-                  setState(() {
-                    _draft = _draft.copyWith(alwaysOnTop: value);
-                  });
-                },
-              ),
-              SwitchListTile(
-                value: _draft.minimizeToTrayOnClose,
-                title: const Text('关闭时回到悬浮球'),
-                subtitle: const Text('点击关闭按钮后不退出，收起为桌面悬浮球入口。'),
-                onChanged: (value) {
-                  setState(() {
-                    _draft = _draft.copyWith(minimizeToTrayOnClose: value);
-                  });
-                },
-              ),
-              SwitchListTile(
-                value: _draft.enableGlobalHotkey,
-                title: const Text('启用全局快捷键 Alt+Shift+T'),
-                subtitle: const Text('无论窗口是否激活，都可显示或隐藏 LightDo。'),
-                onChanged: (value) {
-                  setState(() {
-                    _draft = _draft.copyWith(enableGlobalHotkey: value);
-                  });
-                },
-              ),
-              SwitchListTile(
-                value: _draft.launchAtStartup,
-                title: const Text('开机自启'),
-                subtitle: const Text('在系统登录后自动启动 LightDo。'),
-                onChanged: (value) {
-                  setState(() {
-                    _draft = _draft.copyWith(launchAtStartup: value);
-                  });
-                },
-              ),
-            ],
-          ],
+          ),
         ),
       ),
       actions: [
@@ -1006,17 +983,17 @@ class _EmptyState extends StatelessWidget {
               Text(
                 '现在没有进行中的任务',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF173C35),
-                    ),
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF173C35),
+                ),
               ),
               const SizedBox(height: 6),
               Text(
                 '从上方输入框添加第一条任务。',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xFF6D827C),
-                    ),
+                  color: const Color(0xFF6D827C),
+                ),
               ),
             ],
           ),
@@ -1042,9 +1019,9 @@ class _MiniEmptyState extends StatelessWidget {
       ),
       child: Text(
         message,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF70837E),
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF70837E)),
       ),
     );
   }
