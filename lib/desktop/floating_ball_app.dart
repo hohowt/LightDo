@@ -13,10 +13,7 @@ import 'package:window_manager/window_manager.dart';
 import '../services/lightdo_storage.dart';
 
 class FloatingBallApp extends StatelessWidget {
-  const FloatingBallApp({
-    super.key,
-    required this.mainWindowId,
-  });
+  const FloatingBallApp({super.key, required this.mainWindowId});
 
   final String mainWindowId;
 
@@ -30,10 +27,7 @@ class FloatingBallApp extends StatelessWidget {
 }
 
 class FloatingBallHome extends StatefulWidget {
-  const FloatingBallHome({
-    super.key,
-    required this.mainWindowId,
-  });
+  const FloatingBallHome({super.key, required this.mainWindowId});
 
   final String mainWindowId;
 
@@ -41,7 +35,8 @@ class FloatingBallHome extends StatefulWidget {
   State<FloatingBallHome> createState() => _FloatingBallHomeState();
 }
 
-class _FloatingBallHomeState extends State<FloatingBallHome> with WindowListener {
+class _FloatingBallHomeState extends State<FloatingBallHome>
+    with WindowListener {
   final LightDoStorage _storage = const FileLightDoStorage();
   final SystemTray _systemTray = SystemTray();
   final Menu _trayMenu = Menu();
@@ -78,6 +73,16 @@ class _FloatingBallHomeState extends State<FloatingBallHome> with WindowListener
         case 'refreshSettings':
           await _loadSettings();
           return null;
+        case 'setBallOverlayState':
+          final arguments =
+              (call.arguments as Map?)?.cast<String, dynamic>() ??
+              const <String, dynamic>{};
+          final coveredByMain = arguments['coveredByMain'] as bool? ?? false;
+          await windowManager.setAlwaysOnTop(!coveredByMain);
+          if (!coveredByMain) {
+            await windowManager.show();
+          }
+          return null;
         default:
           throw MissingPluginException('Unknown method: ${call.method}');
       }
@@ -98,6 +103,9 @@ class _FloatingBallHomeState extends State<FloatingBallHome> with WindowListener
   }
 
   Future<void> _syncLaunchAtStartup() async {
+    if (!Platform.isWindows) {
+      return;
+    }
     launchAtStartup.setup(
       appName: 'LightDo',
       appPath: Platform.resolvedExecutable,
@@ -184,7 +192,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome> with WindowListener
     final controller = WindowController.fromWindowId(widget.mainWindowId);
     final position = await windowManager.getPosition();
     final size = await windowManager.getSize();
-    final display = await screenRetriever.getPrimaryDisplay();
+    final display = await _resolveDisplayForBall(position, size);
     final visiblePosition = display.visiblePosition ?? Offset.zero;
     final visibleSize = display.visibleSize ?? display.size;
     final centerX = position.dx + size.width / 2;
@@ -204,6 +212,54 @@ class _FloatingBallHomeState extends State<FloatingBallHome> with WindowListener
     });
   }
 
+  Future<Display> _resolveDisplayForBall(Offset position, Size size) async {
+    final displays = await screenRetriever.getAllDisplays();
+    if (displays.isEmpty) {
+      return screenRetriever.getPrimaryDisplay();
+    }
+
+    final ballCenter = Offset(
+      position.dx + size.width / 2,
+      position.dy + size.height / 2,
+    );
+    Display? bestDisplay;
+    double? bestDistance;
+
+    for (final display in displays) {
+      final displayRect = _displayRect(display);
+      if (displayRect.contains(ballCenter)) {
+        return display;
+      }
+      final distance = _distanceToRect(ballCenter, displayRect);
+      if (bestDistance == null || distance < bestDistance) {
+        bestDistance = distance;
+        bestDisplay = display;
+      }
+    }
+
+    return bestDisplay ?? screenRetriever.getPrimaryDisplay();
+  }
+
+  Rect _displayRect(Display display) {
+    final position = display.visiblePosition ?? Offset.zero;
+    final size = display.visibleSize ?? display.size;
+    return Rect.fromLTWH(position.dx, position.dy, size.width, size.height);
+  }
+
+  double _distanceToRect(Offset point, Rect rect) {
+    final dx = point.dx < rect.left
+        ? rect.left - point.dx
+        : point.dx > rect.right
+        ? point.dx - rect.right
+        : 0.0;
+    final dy = point.dy < rect.top
+        ? rect.top - point.dy
+        : point.dy > rect.bottom
+        ? point.dy - rect.bottom
+        : 0.0;
+    return dx * dx + dy * dy;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -211,6 +267,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome> with WindowListener
       body: Center(
         child: DragToMoveArea(
           child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: () {
               unawaited(_openMainWindow());
             },
@@ -222,10 +279,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome> with WindowListener
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xD91A7A68),
-                    Color(0xD93CA692),
-                  ],
+                  colors: [Color(0xD91A7A68), Color(0xD93CA692)],
                 ),
                 border: Border.all(
                   color: Colors.white.withValues(alpha: 0.82),

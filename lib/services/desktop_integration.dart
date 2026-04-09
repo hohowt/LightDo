@@ -51,6 +51,7 @@ class MainDesktopIntegration extends DesktopIntegration with WindowListener {
   static const Size _mainWindowMinSize = Size(360, 520);
   static const double _screenPadding = 20;
   static const double _ballOverlap = 28;
+  static const double _ballVerticalOverlap = 26;
 
   final WindowController? _currentWindowController;
   final WindowManager _windowManager = windowManager;
@@ -106,15 +107,18 @@ class MainDesktopIntegration extends DesktopIntegration with WindowListener {
       return;
     }
     await _windowManager.hide();
+    await _restoreFloatingBall();
   }
 
   @override
   Future<void> onWindowClose() async {
     if (!_settings.minimizeToTrayOnClose) {
+      await _restoreFloatingBall();
       await _windowManager.destroy();
       return;
     }
     await _windowManager.hide();
+    await _restoreFloatingBall();
   }
 
   Future<dynamic> _handleWindowCall(MethodCall call) async {
@@ -160,6 +164,7 @@ class MainDesktopIntegration extends DesktopIntegration with WindowListener {
     final ballX = (payload['ballX'] as num).toDouble();
     final ballY = (payload['ballY'] as num).toDouble();
     final ballWidth = (payload['ballWidth'] as num).toDouble();
+    final ballHeight = (payload['ballHeight'] as num).toDouble();
     final visibleX = (payload['visibleX'] as num).toDouble();
     final visibleY = (payload['visibleY'] as num).toDouble();
     final visibleWidth = (payload['visibleWidth'] as num).toDouble();
@@ -175,23 +180,27 @@ class MainDesktopIntegration extends DesktopIntegration with WindowListener {
           visibleX + visibleWidth - _mainWindowSize.width - _screenPadding,
         )
         .toDouble();
-    final top = (ballY - 18)
+    final top = (ballY + (ballHeight / 2) - _ballVerticalOverlap)
         .clamp(
           visibleY + _screenPadding,
           visibleY + visibleHeight - _mainWindowSize.height - _screenPadding,
         )
         .toDouble();
 
+    await _floatingBallController?.invokeMethod('setBallOverlayState', {
+      'coveredByMain': true,
+    });
     await _windowManager.setBounds(
-      Rect.fromLTWH(
-        left,
-        top,
-        _mainWindowSize.width,
-        _mainWindowSize.height,
-      ),
+      Rect.fromLTWH(left, top, _mainWindowSize.width, _mainWindowSize.height),
     );
     await _windowManager.setAlwaysOnTop(_settings.alwaysOnTop);
     await _windowManager.show();
     await _windowManager.focus();
+  }
+
+  Future<void> _restoreFloatingBall() async {
+    await _floatingBallController?.invokeMethod('setBallOverlayState', {
+      'coveredByMain': false,
+    });
   }
 }
