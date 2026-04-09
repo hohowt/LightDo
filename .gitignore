@@ -1,11 +1,3 @@
-# Node / Electron
-node_modules/
-package-lock.json
-dist/
-release/
-out/
-*.tsbuildinfo
-
 # Flutter / Dart
 .dart_tool/
 .flutter-plugins
@@ -16,11 +8,6 @@ build/
 # Logs
 logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
 # Editors
 .vscode/*
@@ -55,3 +42,4 @@ desktop.ini
 # Windows
 *.lnk
 *.bat.log
+.claude
