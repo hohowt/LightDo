@@ -345,54 +345,45 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     final completedRate = _todos.isEmpty ? 0 : ((completedTodos.length / _todos.length) * 100).round();
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFFF5EFE2),
-              Color(0xFFE3EDE7),
-              Color(0xFFDCE8F2),
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 980),
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _HeaderSection(
-                            totalCount: _todos.length,
-                            activeCount: activeTodos.length,
-                            completedCount: completedTodos.length,
-                            completedRate: completedRate,
-                            showWindowsBadge: Platform.isWindows,
-                            onOpenSettings: () => _openSettingsSheet(context),
-                          ),
-                          const SizedBox(height: 20),
-                          _ComposerCard(
-                            controller: _inputController,
-                            onSubmit: _addTodo,
-                          ),
-                          if (_errorMessage != null) ...[
-                            const SizedBox(height: 16),
-                            _InlineNotice(message: _errorMessage!),
-                          ],
-                          const SizedBox(height: 20),
-                          Expanded(
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                final isWide = constraints.maxWidth >= 780;
-                                final listPanel = _TaskPanel(
-                                  title: '进行中',
-                                  subtitle: '拖拽排序只作用于未完成任务',
+      backgroundColor: const Color(0xFFF7F4ED),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _HeaderSection(
+                          totalCount: _todos.length,
+                          activeCount: activeTodos.length,
+                          completedCount: completedTodos.length,
+                          completedRate: completedRate,
+                          showWindowsBadge: Platform.isWindows || Platform.isMacOS,
+                          onOpenSettings: () => _openSettingsSheet(context),
+                        ),
+                        const SizedBox(height: 10),
+                        _ComposerCard(
+                          controller: _inputController,
+                          onSubmit: _addTodo,
+                        ),
+                        if (_errorMessage != null) ...[
+                          const SizedBox(height: 12),
+                          _InlineNotice(message: _errorMessage!),
+                        ],
+                        const SizedBox(height: 18),
+                        Expanded(
+                          child: _TaskPanel(
+                            title: '待办',
+                            subtitle: activeTodos.isEmpty
+                                ? '还没有进行中的任务'
+                                : '${activeTodos.length} 项进行中',
+                            child: Column(
+                              children: [
+                                Expanded(
                                   child: activeTodos.isEmpty
                                       ? const _EmptyState()
                                       : ReorderableListView.builder(
@@ -405,62 +396,50 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                               key: ValueKey(todo.id),
                                               todo: todo,
                                               compact: _settings.compactMode,
-                                              onToggle: (selected) => _toggleTodo(
-                                                todo.id,
-                                                selected,
-                                              ),
+                                              onToggle: (selected) =>
+                                                  _toggleTodo(todo.id, selected),
                                               onEdit: () => _editTodo(todo),
-                                              onDelete: () => _deleteTodo(todo.id),
-                                              handle: ReorderableDragStartListener(
+                                              onDelete: () =>
+                                                  _deleteTodo(todo.id),
+                                              handle:
+                                                  ReorderableDragStartListener(
                                                 index: index,
                                                 child: const Icon(
                                                   Icons.drag_indicator_rounded,
-                                                  color: Color(0xFF52796F),
+                                                  color: Color(0xFF7B8A83),
+                                                  size: 18,
                                                 ),
                                               ),
                                             );
                                           },
                                         ),
-                                );
-
-                                final completedPanel = _CompletedPanel(
+                                ),
+                                const SizedBox(height: 16),
+                                _CompletedPanel(
                                   completedTodos: completedTodos,
-                                  expanded: _settings.expandCompletedByDefault,
+                                  expanded:
+                                      _settings.expandCompletedByDefault,
                                   compact: _settings.compactMode,
                                   onToggleExpanded: (value) => _updateSettings(
-                                    _settings.copyWith(expandCompletedByDefault: value),
+                                    _settings.copyWith(
+                                      expandCompletedByDefault: value,
+                                    ),
                                   ),
-                                  onClearCompleted: completedTodos.isEmpty ? null : _clearCompleted,
+                                  onClearCompleted: completedTodos.isEmpty
+                                      ? null
+                                      : _clearCompleted,
                                   onToggleTodo: (todo, selected) =>
                                       _toggleTodo(todo.id, selected),
                                   onEditTodo: _editTodo,
-                                  onDeleteTodo: (todo) => _deleteTodo(todo.id),
-                                );
-
-                                if (isWide) {
-                                  return Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(flex: 3, child: listPanel),
-                                      const SizedBox(width: 18),
-                                      Expanded(flex: 2, child: completedPanel),
-                                    ],
-                                  );
-                                }
-
-                                return ListView(
-                                  children: [
-                                    SizedBox(height: 420, child: listPanel),
-                                    const SizedBox(height: 18),
-                                    completedPanel,
-                                  ],
-                                );
-                              },
+                                  onDeleteTodo: (todo) =>
+                                      _deleteTodo(todo.id),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-              ),
+                        ),
+                      ],
+                    ),
             ),
           ),
         ),
@@ -499,57 +478,51 @@ class _HeaderSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: _panelDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'LightDo',
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF163832),
-                          ),
+              Text(
+                'LightDo',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF1C2F2A),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '桌面风格的 Flutter 待办应用，聚焦任务录入、整理与回顾。',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: const Color(0xFF4C635D),
-                          ),
-                    ),
-                  ],
-                ),
               ),
-              IconButton.filledTonal(
-                onPressed: onOpenSettings,
-                icon: const Icon(Icons.tune_rounded),
-                tooltip: '设置',
+              const SizedBox(height: 4),
+              Text(
+                '总计 $totalCount 项，进行中 $activeCount 项，已完成 $completedCount 项，完成率 $completedRate%',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF75817D),
+                    ),
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              _StatPill(label: '总任务', value: '$totalCount'),
-              _StatPill(label: '进行中', value: '$activeCount'),
-              _StatPill(label: '已完成', value: '$completedCount'),
-              _StatPill(label: '完成率', value: '$completedRate%'),
-              if (showWindowsBadge)
-                const _StatPill(label: 'Windows', value: '桌面增强'),
-            ],
+        ),
+        IconButton(
+          onPressed: onOpenSettings,
+          icon: const Icon(Icons.settings_outlined),
+          tooltip: '设置',
+          color: const Color(0xFF4A5A55),
+        ),
+        if (showWindowsBadge)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8ECE4),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              'Desktop',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: const Color(0xFF4D5B56),
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -566,26 +539,38 @@ class _ComposerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: _panelDecoration(),
+      padding: const EdgeInsets.only(bottom: 8),
+      decoration: const BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFD9DED4)),
+        ),
+      ),
       child: Row(
         children: [
+          const Padding(
+            padding: EdgeInsets.only(right: 10),
+            child: Icon(
+              Icons.add_rounded,
+              color: Color(0xFF6C7A74),
+            ),
+          ),
           Expanded(
             child: TextField(
               controller: controller,
               onSubmitted: (_) => onSubmit(),
               decoration: const InputDecoration(
-                hintText: '输入新任务，回车即可添加',
-                prefixIcon: Icon(Icons.add_task_rounded),
-                border: OutlineInputBorder(),
+                hintText: '添加待办，按回车确认',
+                isCollapsed: true,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(vertical: 10),
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          FilledButton.icon(
+          TextButton(
             onPressed: onSubmit,
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('添加'),
+            child: const Text('添加'),
           ),
         ],
       ),
@@ -607,8 +592,7 @@ class _TaskPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: _panelDecoration(),
+      padding: const EdgeInsets.only(top: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -623,7 +607,7 @@ class _TaskPanel extends StatelessWidget {
           Text(
             subtitle,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF66807A),
+                  color: const Color(0xFF78847F),
                 ),
           ),
           const SizedBox(height: 14),
@@ -658,8 +642,12 @@ class _CompletedPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: _panelDecoration(),
+      padding: const EdgeInsets.only(top: 14),
+      decoration: const BoxDecoration(
+        border: Border(
+          top: BorderSide(color: Color(0xFFE2E5DD)),
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -673,14 +661,14 @@ class _CompletedPanel extends StatelessWidget {
                       '已完成',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.w700,
-                            color: const Color(0xFF173C35),
+                            color: const Color(0xFF33413D),
                           ),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '支持折叠查看与批量清理。',
+                      '${completedTodos.length} 项',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: const Color(0xFF66807A),
+                            color: const Color(0xFF7A8580),
                           ),
                     ),
                   ],
@@ -759,13 +747,13 @@ class _TodoCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.45)),
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E5DD)),
       ),
       padding: EdgeInsets.symmetric(
-        horizontal: compact ? 12 : 16,
-        vertical: compact ? 10 : 14,
+        horizontal: compact ? 10 : 12,
+        vertical: compact ? 8 : 10,
       ),
       child: Row(
         children: [
@@ -794,12 +782,12 @@ class _TodoCard extends StatelessWidget {
           ),
           IconButton(
             onPressed: onEdit,
-            icon: const Icon(Icons.edit_outlined),
+            icon: const Icon(Icons.edit_outlined, size: 18),
             tooltip: '编辑',
           ),
           IconButton(
             onPressed: onDelete,
-            icon: const Icon(Icons.delete_outline_rounded),
+            icon: const Icon(Icons.close_rounded, size: 18),
             tooltip: '删除',
           ),
         ],
@@ -921,43 +909,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   }
 }
 
-class _StatPill extends StatelessWidget {
-  const _StatPill({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: const Color(0xFF70837E),
-                ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: const Color(0xFF183A33),
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _FloatingBallSurface extends StatelessWidget {
   const _FloatingBallSurface({required this.onOpen});
 
@@ -1056,41 +1007,43 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 88,
-              height: 88,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.7),
-                shape: BoxShape.circle,
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.checklist_rounded,
+                  size: 32,
+                  color: Color(0xFF2E6C60),
+                ),
               ),
-              child: const Icon(
-                Icons.checklist_rounded,
-                size: 40,
-                color: Color(0xFF2E6C60),
+              const SizedBox(height: 12),
+              Text(
+                '现在没有进行中的任务',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF173C35),
+                    ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '现在没有进行中的任务',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: const Color(0xFF173C35),
-                  ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '从上方输入框添加第一条任务，或把已完成任务重新勾回进行中。',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF6D827C),
-                  ),
-            ),
-          ],
+              const SizedBox(height: 6),
+              Text(
+                '从上方输入框添加第一条任务。',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF6D827C),
+                    ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1119,26 +1072,4 @@ class _MiniEmptyState extends StatelessWidget {
       ),
     );
   }
-}
-
-BoxDecoration _panelDecoration() {
-  return BoxDecoration(
-    borderRadius: BorderRadius.circular(28),
-    border: Border.all(color: Colors.white.withValues(alpha: 0.45)),
-    gradient: LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [
-        Colors.white.withValues(alpha: 0.76),
-        Colors.white.withValues(alpha: 0.58),
-      ],
-    ),
-    boxShadow: [
-      BoxShadow(
-        color: const Color(0xFF28443F).withValues(alpha: 0.08),
-        blurRadius: 24,
-        offset: const Offset(0, 16),
-      ),
-    ],
-  );
 }

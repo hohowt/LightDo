@@ -159,6 +159,26 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
     await showFloatingBall();
   }
 
+  @override
+  Future<void> onWindowBlur() async {
+    if (_modeNotifier.value != DesktopSurfaceMode.main) {
+      return;
+    }
+    if (!_settings.minimizeToTrayOnClose) {
+      return;
+    }
+    await showFloatingBall();
+  }
+
+  @override
+  Future<void> onWindowMoved() async {
+    if (_modeNotifier.value != DesktopSurfaceMode.floatingBall) {
+      return;
+    }
+    final snapped = await _calculateFloatingBallBoundsFromCurrentPosition();
+    await _windowManager.setBounds(snapped);
+  }
+
   Future<void> toggleSurface() async {
     if (_modeNotifier.value == DesktopSurfaceMode.floatingBall) {
       await showMainWindow();
@@ -338,6 +358,25 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
       _floatingBallSize.width,
       _floatingBallSize.height,
     );
+  }
+
+  Future<Rect> _calculateFloatingBallBoundsFromCurrentPosition() async {
+    final position = await _windowManager.getPosition();
+    final display = await screenRetriever.getPrimaryDisplay();
+    final visiblePosition = display.visiblePosition ?? Offset.zero;
+    final visibleSize = display.visibleSize ?? display.size;
+    final leftEdge = visiblePosition.dx + _screenPadding;
+    final rightEdge =
+        visiblePosition.dx + visibleSize.width - _floatingBallSize.width - _screenPadding;
+    final topEdge = visiblePosition.dy + _screenPadding;
+    final bottomEdge =
+        visiblePosition.dy + visibleSize.height - _floatingBallSize.height - _screenPadding;
+
+    final snapToRight = (rightEdge - position.dx).abs() <=
+        (position.dx - leftEdge).abs();
+    final x = snapToRight ? rightEdge : leftEdge;
+    final y = position.dy.clamp(topEdge, bottomEdge).toDouble();
+    return Rect.fromLTWH(x, y, _floatingBallSize.width, _floatingBallSize.height);
   }
 
   Future<Rect> _calculateMainWindowBounds() async {

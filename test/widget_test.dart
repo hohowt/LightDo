@@ -36,7 +36,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), '补齐 Flutter 页面');
-    await tester.tap(find.widgetWithText(FilledButton, '添加'));
+    await tester.tap(find.widgetWithText(TextButton, '添加'));
     await tester.pumpAndSettle();
 
     expect(find.text('补齐 Flutter 页面'), findsOneWidget);
