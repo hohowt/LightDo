@@ -54,7 +54,12 @@ void main() {
     await tester.pumpWidget(
       LightDoApp(
         storage: MemoryLightDoStorage(
-          AppSnapshot(todos: [recurringTodo], settings: AppSettings.defaults()),
+          AppSnapshot(
+            todos: [recurringTodo],
+            settings: AppSettings.defaults().copyWith(
+              expandCompletedByDefault: true,
+            ),
+          ),
         ),
         desktopIntegration: NoopDesktopIntegration(),
       ),
@@ -64,7 +69,8 @@ void main() {
     await tester.tap(find.byType(Checkbox).first);
     await tester.pumpAndSettle();
 
-    expect(find.text('写周报'), findsNWidgets(2));
+    expect(find.text('写周报'), findsOneWidget);
+    expect(find.text('今天已完成 1 项'), findsOneWidget);
   });
 
   testWidgets('renders overdue badge for expired todo', (tester) async {
@@ -84,5 +90,33 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('已过期'), findsOneWidget);
+  });
+
+  testWidgets('shows collapsed completed preview for today items', (
+    tester,
+  ) async {
+    final completedA = TodoItem.create(
+      title: '整理桌面',
+    ).copyWith(isCompleted: true, updatedAt: DateTime.now());
+    final completedB = TodoItem.create(
+      title: '发送日报',
+    ).copyWith(isCompleted: true, updatedAt: DateTime.now());
+
+    await tester.pumpWidget(
+      LightDoApp(
+        storage: MemoryLightDoStorage(
+          AppSnapshot(
+            todos: [completedA, completedB],
+            settings: AppSettings.defaults(),
+          ),
+        ),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('今天已完成 2 项'), findsOneWidget);
+    expect(find.text('整理桌面'), findsNothing);
+    expect(find.text('发送日报'), findsNothing);
   });
 }

@@ -113,7 +113,7 @@ class TodoItem {
 
   TodoDeadlineState deadlineStateAt(
     DateTime now, {
-    Duration dueSoonThreshold = const Duration(hours: 24),
+    Duration dueSoonThreshold = const Duration(minutes: 30),
   }) {
     if (isCompleted || dueAt == null) {
       return TodoDeadlineState.normal;

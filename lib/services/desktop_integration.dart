@@ -56,8 +56,8 @@ class EditorDesktopIntegration extends DesktopIntegration with WindowListener {
        _ownerWindowController = WindowController.fromWindowId(ownerWindowId),
        _windowManager = windowManagerInstance ?? windowManager;
 
-  static const Size _editorWindowSize = Size(420, 640);
-  static const Size _editorWindowMinSize = Size(360, 520);
+  static const Size _editorWindowSize = Size(420, 720);
+  static const Size _editorWindowMinSize = Size(360, 600);
   static const double _screenPadding = 20;
   static const double _ballOverlap = 56;
   static const double _ballVerticalAnchorOffset = 24;
@@ -162,8 +162,7 @@ class EditorDesktopIntegration extends DesktopIntegration with WindowListener {
     final visibleX = (payload['visibleX'] as num?)?.toDouble() ?? 0;
     final visibleY = (payload['visibleY'] as num?)?.toDouble() ?? 0;
     final visibleWidth = (payload['visibleWidth'] as num?)?.toDouble() ?? 1440;
-    final visibleHeight =
-        (payload['visibleHeight'] as num?)?.toDouble() ?? 900;
+    final visibleHeight = (payload['visibleHeight'] as num?)?.toDouble() ?? 900;
     final anchorSide = payload['anchorSide'] as String? ?? 'right';
 
     final left = anchorSide == 'right'

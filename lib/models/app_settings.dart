@@ -11,7 +11,7 @@ class AppSettings {
 
   factory AppSettings.defaults() {
     return const AppSettings(
-      expandCompletedByDefault: true,
+      expandCompletedByDefault: false,
       confirmBeforeClearingCompleted: true,
       compactMode: false,
       alwaysOnTop: false,
@@ -26,7 +26,8 @@ class AppSettings {
       return AppSettings.defaults();
     }
     return AppSettings(
-      expandCompletedByDefault: json['expandCompletedByDefault'] as bool? ?? true,
+      expandCompletedByDefault:
+          json['expandCompletedByDefault'] as bool? ?? false,
       confirmBeforeClearingCompleted:
           json['confirmBeforeClearingCompleted'] as bool? ?? true,
       compactMode: json['compactMode'] as bool? ?? false,
@@ -57,8 +58,8 @@ class AppSettings {
     return AppSettings(
       expandCompletedByDefault:
           expandCompletedByDefault ?? this.expandCompletedByDefault,
-      confirmBeforeClearingCompleted: confirmBeforeClearingCompleted ??
-          this.confirmBeforeClearingCompleted,
+      confirmBeforeClearingCompleted:
+          confirmBeforeClearingCompleted ?? this.confirmBeforeClearingCompleted,
       compactMode: compactMode ?? this.compactMode,
       alwaysOnTop: alwaysOnTop ?? this.alwaysOnTop,
       minimizeToTrayOnClose:

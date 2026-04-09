@@ -94,8 +94,8 @@ Future<void> _configureDesktopWindow(LightDoWindowRole role) async {
           windowButtonVisibility: false,
         )
       : const WindowOptions(
-          size: Size(420, 640),
-          minimumSize: Size(360, 520),
+          size: Size(420, 720),
+          minimumSize: Size(360, 600),
           center: true,
           title: 'LightDo',
           backgroundColor: Color(0xFFF7F4ED),
@@ -124,7 +124,7 @@ void _configureBitsdojoWindow(LightDoWindowRole role) {
       return;
     }
 
-    const editorMinSize = Size(360, 520);
+    const editorMinSize = Size(360, 600);
     win.minSize = editorMinSize;
   });
 }
@@ -211,7 +211,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
       }
       setState(() {
         _todos = snapshot.todos;
-        _settings = snapshot.settings;
+        _settings = snapshot.settings.copyWith(expandCompletedByDefault: false);
         _isLoading = false;
       });
       unawaited(_initializeDesktopIntegration());
@@ -221,6 +221,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
       }
       setState(() {
         _isLoading = false;
+        _settings = _settings.copyWith(expandCompletedByDefault: false);
         _errorMessage = '本地数据读取失败，已回退为空列表。';
       });
       unawaited(_initializeDesktopIntegration());
@@ -501,7 +502,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 430),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(18, 28, 18, 20),
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : Column(
@@ -537,7 +538,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                           const SizedBox(height: 12),
                           _InlineNotice(message: _errorMessage!),
                         ],
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 14),
                         Expanded(
                           child: _TaskPanel(
                             title: '待办',
@@ -820,7 +821,7 @@ class _TaskPanel extends StatelessWidget {
               context,
             ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF78847F)),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Expanded(child: child),
         ],
       ),
@@ -828,7 +829,7 @@ class _TaskPanel extends StatelessWidget {
   }
 }
 
-class _CompletedPanel extends StatelessWidget {
+class _CompletedPanel extends StatefulWidget {
   const _CompletedPanel({
     required this.completedTodos,
     required this.expanded,
@@ -850,7 +851,22 @@ class _CompletedPanel extends StatelessWidget {
   final void Function(TodoItem todo) onDeleteTodo;
 
   @override
+  State<_CompletedPanel> createState() => _CompletedPanelState();
+}
+
+class _CompletedPanelState extends State<_CompletedPanel> {
+  late final ScrollController _completedScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _completedScrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final completedToday = _completedToday(widget.completedTodos);
+
     return Container(
       padding: const EdgeInsets.only(top: 14),
       decoration: const BoxDecoration(
@@ -874,7 +890,7 @@ class _CompletedPanel extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${completedTodos.length} 项',
+                      '${widget.completedTodos.length} 项',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: const Color(0xFF7A8580),
                       ),
@@ -883,44 +899,147 @@ class _CompletedPanel extends StatelessWidget {
                 ),
               ),
               IconButton(
-                onPressed: () => onToggleExpanded(!expanded),
+                onPressed: () => widget.onToggleExpanded(!widget.expanded),
                 icon: Icon(
-                  expanded
+                  widget.expanded
                       ? Icons.unfold_less_rounded
                       : Icons.unfold_more_rounded,
                 ),
-                tooltip: expanded ? '折叠' : '展开',
+                tooltip: widget.expanded ? '折叠' : '展开',
               ),
             ],
           ),
           const SizedBox(height: 12),
-          if (expanded) ...[
-            if (completedTodos.isEmpty)
+          if (widget.expanded) ...[
+            if (widget.completedTodos.isEmpty)
               const _MiniEmptyState(message: '已完成任务会收纳在这里。')
             else
-              Column(
-                children: completedTodos
-                    .map(
-                      (todo) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _TodoCard(
-                          todo: todo,
-                          compact: compact,
-                          onToggle: (selected) => onToggleTodo(todo, selected),
-                          onEdit: () => onEditTodo(todo),
-                          onDelete: () => onDeleteTodo(todo),
-                        ),
-                      ),
-                    )
-                    .toList(growable: false),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: widget.compact ? 140 : 180,
+                ),
+                child: Scrollbar(
+                  controller: _completedScrollController,
+                  thumbVisibility: true,
+                  child: ListView.separated(
+                    controller: _completedScrollController,
+                    shrinkWrap: true,
+                    itemCount: widget.completedTodos.length,
+                    separatorBuilder: (_, index) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final todo = widget.completedTodos[index];
+                      return _TodoCard(
+                        todo: todo,
+                        compact: widget.compact,
+                        onToggle: (selected) =>
+                            widget.onToggleTodo(todo, selected),
+                        onEdit: () => widget.onEditTodo(todo),
+                        onDelete: () => widget.onDeleteTodo(todo),
+                      );
+                    },
+                  ),
+                ),
               ),
           ] else
-            const _MiniEmptyState(message: '已折叠，点击右上角展开查看。'),
+            _CompletedPreviewStrip(completedToday: completedToday),
           const SizedBox(height: 14),
           FilledButton.tonalIcon(
-            onPressed: onClearCompleted,
+            onPressed: widget.onClearCompleted,
             icon: const Icon(Icons.delete_sweep_rounded),
             label: const Text('清空已完成'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<TodoItem> _completedToday(List<TodoItem> todos) {
+    final now = DateTime.now();
+    return todos
+        .where((todo) => _isSameDay(todo.updatedAt, now))
+        .toList(growable: false);
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+}
+
+class _CompletedPreviewStrip extends StatelessWidget {
+  const _CompletedPreviewStrip({required this.completedToday});
+
+  final List<TodoItem> completedToday;
+
+  @override
+  Widget build(BuildContext context) {
+    if (completedToday.isEmpty) {
+      return const _MiniEmptyState(message: '已折叠，今天还没有新完成项。');
+    }
+
+    final visibleTodos = completedToday.take(8).toList(growable: false);
+    final overflow = completedToday.length - visibleTodos.length;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '今天已完成 ${completedToday.length} 项',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: const Color(0xFF70837E),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final todo in visibleTodos) ...[
+                  Tooltip(
+                    message: todo.title,
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE5F0E8),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: const Color(0xFF94B39E)),
+                      ),
+                      child: const Icon(
+                        Icons.check_rounded,
+                        size: 14,
+                        color: Color(0xFF2E6C60),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (overflow > 0)
+                  Container(
+                    height: 24,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE9ECE7),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '+$overflow',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: const Color(0xFF6C7A74),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1098,7 +1217,10 @@ class _TodoScheduleDialog extends StatefulWidget {
 }
 
 class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
-  late DateTime? _draftDueAt = widget.initialDueAt;
+  late DateTime _draftDate = widget.initialDueAt ?? _defaultDueAt();
+  late int _draftHour = (widget.initialDueAt ?? _draftDate).hour;
+  late int _draftMinute = (widget.initialDueAt ?? _draftDate).minute;
+  late bool _scheduleEnabled = widget.initialDueAt != null;
   late TodoRecurrence _draftRecurrence = widget.initialDueAt == null
       ? TodoRecurrence.none
       : widget.initialRecurrence;
@@ -1108,78 +1230,141 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     return AlertDialog(
       title: Text(widget.title),
       content: SizedBox(
-        width: 380,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              _draftDueAt == null
-                  ? '未设置截止时间'
-                  : '截止 ${formatShortDateTime(_draftDueAt!)}',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _pickDueAt,
-                  icon: const Icon(Icons.event_available_rounded),
-                  label: Text(_draftDueAt == null ? '选择时间' : '重新选择'),
-                ),
-                if (_draftDueAt != null)
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _draftDueAt = null;
-                        _draftRecurrence = TodoRecurrence.none;
-                      });
-                    },
-                    child: const Text('清除'),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<TodoRecurrence>(
-              key: ValueKey(_draftRecurrence),
-              initialValue: _draftRecurrence,
-              decoration: const InputDecoration(
-                labelText: '定时任务',
-                border: OutlineInputBorder(),
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                !_scheduleEnabled
+                    ? '未设置截止时间'
+                    : '截止 ${formatShortDateTime(_composeDraftDueAt())}',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
               ),
-              items: TodoRecurrence.values
-                  .map(
-                    (value) => DropdownMenuItem(
-                      value: value,
-                      child: Text(value.label),
+              const SizedBox(height: 12),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('启用截止时间'),
+                subtitle: const Text('在当前页面直接设置日期和时间'),
+                value: _scheduleEnabled,
+                onChanged: (enabled) {
+                  setState(() {
+                    _scheduleEnabled = enabled;
+                    if (!enabled) {
+                      _draftRecurrence = TodoRecurrence.none;
+                    }
+                  });
+                },
+              ),
+              if (_scheduleEnabled) ...[
+                const SizedBox(height: 8),
+                InputDatePickerFormField(
+                  initialDate: _draftDate,
+                  firstDate: DateTime(DateTime.now().year - 1),
+                  lastDate: DateTime(DateTime.now().year + 5),
+                  fieldLabelText: '截止日期',
+                  fieldHintText: 'yyyy/mm/dd',
+                  onDateSubmitted: _updateDraftDate,
+                  onDateSaved: _updateDraftDate,
+                  errorFormatText: '日期格式不正确',
+                  errorInvalidText: '日期不在允许范围内',
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        initialValue: _draftHour,
+                        decoration: const InputDecoration(
+                          labelText: '小时',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: List.generate(
+                          24,
+                          (index) => DropdownMenuItem(
+                            value: index,
+                            child: Text(index.toString().padLeft(2, '0')),
+                          ),
+                        ),
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() {
+                            _draftHour = value;
+                          });
+                        },
+                      ),
                     ),
-                  )
-                  .toList(growable: false),
-              onChanged: _draftDueAt == null
-                  ? null
-                  : (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _draftRecurrence = value;
-                      });
-                    },
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _draftDueAt == null
-                  ? '先设置截止时间后才能启用重复任务。'
-                  : '可选每天、每周或每月重复生成下一次任务。',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: const Color(0xFF6D827C)),
-            ),
-          ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        initialValue: _draftMinute,
+                        decoration: const InputDecoration(
+                          labelText: '分钟',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: List.generate(
+                          60,
+                          (index) => DropdownMenuItem(
+                            value: index,
+                            child: Text(index.toString().padLeft(2, '0')),
+                          ),
+                        ),
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() {
+                            _draftMinute = value;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+              DropdownButtonFormField<TodoRecurrence>(
+                key: ValueKey(_draftRecurrence),
+                initialValue: _draftRecurrence,
+                decoration: const InputDecoration(
+                  labelText: '定时任务',
+                  border: OutlineInputBorder(),
+                ),
+                items: TodoRecurrence.values
+                    .map(
+                      (value) => DropdownMenuItem(
+                        value: value,
+                        child: Text(value.label),
+                      ),
+                    )
+                    .toList(growable: false),
+                onChanged: !_scheduleEnabled
+                    ? null
+                    : (value) {
+                        if (value == null) {
+                          return;
+                        }
+                        setState(() {
+                          _draftRecurrence = value;
+                        });
+                      },
+              ),
+              const SizedBox(height: 8),
+              Text(
+                !_scheduleEnabled
+                    ? '先设置截止时间后才能启用重复任务。'
+                    : '支持精确到分钟，并可按每天、每周、每月重复。',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: const Color(0xFF6D827C)),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [
@@ -1190,8 +1375,8 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
         FilledButton(
           onPressed: () => Navigator.of(context).pop(
             _TodoScheduleDraft(
-              dueAt: _draftDueAt,
-              recurrence: _draftDueAt == null
+              dueAt: _scheduleEnabled ? _composeDraftDueAt() : null,
+              recurrence: !_scheduleEnabled
                   ? TodoRecurrence.none
                   : _draftRecurrence,
             ),
@@ -1202,35 +1387,37 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     );
   }
 
-  Future<void> _pickDueAt() async {
-    final now = DateTime.now();
-    final initial = _draftDueAt ?? now.add(const Duration(hours: 1));
-    final date = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 5),
-    );
-    if (date == null || !mounted) {
-      return;
-    }
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(initial),
-    );
-    if (time == null || !mounted) {
-      return;
-    }
+  void _updateDraftDate(DateTime value) {
     setState(() {
-      _draftDueAt = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        time.hour,
-        time.minute,
+      _draftDate = DateTime(
+        value.year,
+        value.month,
+        value.day,
+        _draftHour,
+        _draftMinute,
       );
-      _draftRecurrence = _draftRecurrence;
     });
+  }
+
+  DateTime _composeDraftDueAt() {
+    return DateTime(
+      _draftDate.year,
+      _draftDate.month,
+      _draftDate.day,
+      _draftHour,
+      _draftMinute,
+    );
+  }
+
+  static DateTime _defaultDueAt() {
+    final initial = DateTime.now().add(const Duration(hours: 1));
+    return DateTime(
+      initial.year,
+      initial.month,
+      initial.day,
+      initial.hour,
+      initial.minute,
+    );
   }
 }
 
