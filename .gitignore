@@ -1,13 +1,19 @@
-# 依赖
+# Node / Electron
 node_modules/
 package-lock.json
-
-# 构建输出
 dist/
 release/
 out/
+*.tsbuildinfo
 
-# 日志
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+
+# Logs
 logs/
 *.log
 npm-debug.log*
@@ -16,11 +22,12 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# 编辑器
+# Editors
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
 .idea/
+*.iml
 *.swp
 *.swo
 *~
@@ -30,33 +37,21 @@ lerna-debug.log*
 *.sln
 *.sw?
 
-# 操作系统
+# OS
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# 环境变量
+# Env
 .env
 .env.local
 .env.*.local
 
-# 临时文件
+# Temp
 *.tmp
 *.temp
 .cache/
 
-# TypeScript
-*.tsbuildinfo
-
-# Electron
-electron/dist/
-electron/build/
-
-# 打包文件（开发时忽略，发布时上传到 Release）
-# *.exe
-# *.dmg
-# *.AppImage
-
-# Windows 特定
+# Windows
 *.lnk
 *.bat.log
