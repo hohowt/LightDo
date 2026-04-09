@@ -59,8 +59,6 @@ jobs:
           - name: macOS x64
             artifact_suffix: macos-x64
             runner: macos-14
-            build_shell: bash
-            archive_shell: bash
             build_command: flutter build macos --release --build-name="${VERSION}" --build-number="${BUILD_NUMBER}"
             archive_command: |
               mkdir -p dist
@@ -68,8 +66,6 @@ jobs:
           - name: macOS arm64
             artifact_suffix: macos-arm64
             runner: macos-14
-            build_shell: bash
-            archive_shell: bash
             build_command: flutter build macos --release --build-name="${VERSION}" --build-number="${BUILD_NUMBER}"
             archive_command: |
               mkdir -p dist
@@ -77,20 +73,16 @@ jobs:
           - name: Windows x64
             artifact_suffix: windows-x64
             runner: windows-2022
-            build_shell: bash
-            archive_shell: pwsh
             build_command: flutter build windows --release --build-name="${VERSION}" --build-number="${BUILD_NUMBER}"
             archive_command: |
-              New-Item -ItemType Directory -Force -Path dist | Out-Null
-              $stage = "dist/lightdo-$env:TAG_NAME-windows-x64"
-              New-Item -ItemType Directory -Force -Path $stage | Out-Null
-              Copy-Item "build/windows/x64/runner/Release/*" -Destination $stage -Recurse -Force
-              Compress-Archive -Path $stage -DestinationPath "dist/lightdo-$env:TAG_NAME-windows-x64.zip" -Force
+              mkdir -p dist
+              stage="dist/lightdo-${TAG_NAME}-windows-x64"
+              mkdir -p "${stage}"
+              cp -R build/windows/x64/runner/Release/* "${stage}/"
+              cd dist && powershell -Command "Compress-Archive -Path 'lightdo-${TAG_NAME}-windows-x64' -DestinationPath 'lightdo-${TAG_NAME}-windows-x64.zip' -Force"
           - name: Linux x64
             artifact_suffix: linux-x64
             runner: ubuntu-22.04
-            build_shell: bash
-            archive_shell: bash
             build_command: flutter build linux --release --build-name="${VERSION}" --build-number="${BUILD_NUMBER}"
             archive_command: |
               mkdir -p dist
@@ -125,11 +117,11 @@ jobs:
         run: flutter pub get
 
       - name: Build desktop app
-        shell: ${{ matrix.build_shell }}
+        shell: bash
         run: ${{ matrix.build_command }}
 
       - name: Package desktop app
-        shell: ${{ matrix.archive_shell }}
+        shell: bash
         run: ${{ matrix.archive_command }}
 
       - name: Upload packaged artifact
