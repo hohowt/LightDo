@@ -1,49 +1,103 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'desktop/floating_ball_app.dart';
+import 'desktop/window_arguments.dart';
 import 'models/app_settings.dart';
 import 'models/app_snapshot.dart';
 import 'models/todo_item.dart';
 import 'services/desktop_integration.dart';
 import 'services/lightdo_storage.dart';
 
-Future<void> main() async {
+Future<void> main([List<String> args = const []]) async {
   WidgetsFlutterBinding.ensureInitialized();
-  await _configureDesktopWindow();
-  runApp(const LightDoApp());
+  final launchContext = await _resolveLaunchContext();
+  await _configureDesktopWindow(launchContext.arguments.role);
+
+  if (launchContext.arguments.role == LightDoWindowRole.floatingBall) {
+    runApp(
+      FloatingBallApp(
+        mainWindowId: launchContext.arguments.mainWindowId ?? '',
+      ),
+    );
+    return;
+  }
+
+  runApp(
+    LightDoApp(
+      desktopIntegration: createDesktopIntegration(
+        currentWindowController: launchContext.controller,
+        enabled: true,
+      ),
+    ),
+  );
 }
 
-Future<void> _configureDesktopWindow() async {
+Future<_LaunchContext> _resolveLaunchContext() async {
+  if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+    return const _LaunchContext(
+      controller: null,
+      arguments: LightDoWindowArguments(role: LightDoWindowRole.main),
+    );
+  }
+
+  await windowManager.ensureInitialized();
+  try {
+    final controller = await WindowController.fromCurrentEngine();
+    final arguments = LightDoWindowArguments.fromEncoded(controller.arguments);
+    return _LaunchContext(controller: controller, arguments: arguments);
+  } catch (_) {
+    return const _LaunchContext(
+      controller: null,
+      arguments: LightDoWindowArguments(role: LightDoWindowRole.main),
+    );
+  }
+}
+
+Future<void> _configureDesktopWindow(LightDoWindowRole role) async {
   if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
     return;
   }
 
-  await windowManager.ensureInitialized();
-  final options = (Platform.isWindows || Platform.isMacOS)
+  final options = role == LightDoWindowRole.floatingBall
       ? const WindowOptions(
           size: Size(76, 76),
           minimumSize: Size(76, 76),
           center: false,
           title: 'LightDo',
           backgroundColor: Colors.transparent,
+          alwaysOnTop: true,
           skipTaskbar: true,
           titleBarStyle: TitleBarStyle.hidden,
           windowButtonVisibility: false,
         )
       : const WindowOptions(
-          size: Size(1180, 780),
-          minimumSize: Size(900, 620),
+          size: Size(420, 640),
+          minimumSize: Size(360, 520),
           center: true,
           title: 'LightDo',
-          backgroundColor: Color(0xFFF4F1E8),
+          backgroundColor: Color(0xFFF7F4ED),
+          titleBarStyle: TitleBarStyle.hidden,
+          windowButtonVisibility: false,
         );
   await windowManager.waitUntilReadyToShow(options, () async {
     await windowManager.show();
     await windowManager.focus();
   });
+}
+
+class _LaunchContext {
+  const _LaunchContext({
+    required this.controller,
+    required this.arguments,
+  });
+
+  final WindowController? controller;
+  final LightDoWindowArguments arguments;
 }
 
 class LightDoApp extends StatelessWidget {
@@ -100,8 +154,6 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   @override
   void initState() {
     super.initState();
-    widget.desktopIntegration.modeListenable.addListener(_handleSurfaceModeChanged);
-    widget.desktopIntegration.anchorSideListenable.addListener(_handleSurfaceModeChanged);
     _loadSnapshot();
   }
 
@@ -109,17 +161,8 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   void dispose() {
     _saveTimer?.cancel();
     _inputController.dispose();
-    widget.desktopIntegration.modeListenable.removeListener(_handleSurfaceModeChanged);
-    widget.desktopIntegration.anchorSideListenable.removeListener(_handleSurfaceModeChanged);
     unawaited(widget.desktopIntegration.dispose());
     super.dispose();
-  }
-
-  void _handleSurfaceModeChanged() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
   }
 
   Future<void> _loadSnapshot() async {
@@ -335,14 +378,6 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final surfaceMode = widget.desktopIntegration.modeListenable.value;
-    if (surfaceMode == DesktopSurfaceMode.floatingBall) {
-      return _FloatingBallSurface(
-        onOpen: () => widget.desktopIntegration.showMainWindow(),
-      );
-    }
-    final anchorSide = widget.desktopIntegration.anchorSideListenable.value;
-
     final activeTodos = _activeTodos;
     final completedTodos = _completedTodos;
     final completedRate = _todos.isEmpty ? 0 : ((completedTodos.length / _todos.length) * 100).round();
@@ -353,115 +388,101 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 430),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 28, 18, 20),
-                  child: _isLoading
-                      ? const Center(child: CircularProgressIndicator())
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            DragToMoveArea(
-                              child: _HeaderSection(
-                                totalCount: _todos.length,
-                                activeCount: activeTodos.length,
-                                completedCount: completedTodos.length,
-                                completedRate: completedRate,
-                                showWindowsBadge:
-                                    Platform.isWindows || Platform.isMacOS,
-                                onOpenSettings: () => _openSettingsSheet(context),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            _ComposerCard(
-                              controller: _inputController,
-                              onSubmit: _addTodo,
-                            ),
-                            if (_errorMessage != null) ...[
-                              const SizedBox(height: 12),
-                              _InlineNotice(message: _errorMessage!),
-                            ],
-                            const SizedBox(height: 18),
-                            Expanded(
-                              child: _TaskPanel(
-                                title: '待办',
-                                subtitle: activeTodos.isEmpty
-                                    ? '还没有进行中的任务'
-                                    : '${activeTodos.length} 项进行中',
-                                child: Column(
-                                  children: [
-                                    Expanded(
-                                      child: activeTodos.isEmpty
-                                          ? const _EmptyState()
-                                          : ReorderableListView.builder(
-                                              buildDefaultDragHandles: false,
-                                              itemCount: activeTodos.length,
-                                              onReorder: _reorderActiveTodos,
-                                              itemBuilder: (context, index) {
-                                                final todo = activeTodos[index];
-                                                return _TodoCard(
-                                                  key: ValueKey(todo.id),
-                                                  todo: todo,
-                                                  compact: _settings.compactMode,
-                                                  onToggle: (selected) => _toggleTodo(
-                                                    todo.id,
-                                                    selected,
-                                                  ),
-                                                  onEdit: () => _editTodo(todo),
-                                                  onDelete: () =>
-                                                      _deleteTodo(todo.id),
-                                                  handle:
-                                                      ReorderableDragStartListener(
-                                                    index: index,
-                                                    child: const Icon(
-                                                      Icons.drag_indicator_rounded,
-                                                      color: Color(0xFF7B8A83),
-                                                      size: 18,
-                                                    ),
-                                                  ),
-                                                );
-                                              },
-                                            ),
-                                    ),
-                                    const SizedBox(height: 16),
-                                    _CompletedPanel(
-                                      completedTodos: completedTodos,
-                                      expanded:
-                                          _settings.expandCompletedByDefault,
-                                      compact: _settings.compactMode,
-                                      onToggleExpanded: (value) =>
-                                          _updateSettings(
-                                        _settings.copyWith(
-                                          expandCompletedByDefault: value,
-                                        ),
-                                      ),
-                                      onClearCompleted: completedTodos.isEmpty
-                                          ? null
-                                          : _clearCompleted,
-                                      onToggleTodo: (todo, selected) =>
-                                          _toggleTodo(todo.id, selected),
-                                      onEditTodo: _editTodo,
-                                      onDeleteTodo: (todo) =>
-                                          _deleteTodo(todo.id),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 28, 18, 20),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DragToMoveArea(
+                          child: _HeaderSection(
+                            totalCount: _todos.length,
+                            activeCount: activeTodos.length,
+                            completedCount: completedTodos.length,
+                            completedRate: completedRate,
+                            showWindowsBadge:
+                                Platform.isWindows || Platform.isMacOS,
+                            onOpenSettings: () => _openSettingsSheet(context),
+                          ),
                         ),
-                ),
-                Positioned(
-                  top: -2,
-                  left: anchorSide == FloatingBallAnchorSide.left ? -12 : null,
-                  right: anchorSide == FloatingBallAnchorSide.right ? -12 : null,
-                  child: _AttachedBall(
-                    onTap: () => widget.desktopIntegration.showFloatingBall(),
-                  ),
-                ),
-              ],
+                        const SizedBox(height: 10),
+                        _ComposerCard(
+                          controller: _inputController,
+                          onSubmit: _addTodo,
+                        ),
+                        if (_errorMessage != null) ...[
+                          const SizedBox(height: 12),
+                          _InlineNotice(message: _errorMessage!),
+                        ],
+                        const SizedBox(height: 18),
+                        Expanded(
+                          child: _TaskPanel(
+                            title: '待办',
+                            subtitle: activeTodos.isEmpty
+                                ? '还没有进行中的任务'
+                                : '${activeTodos.length} 项进行中',
+                            child: Column(
+                              children: [
+                                Expanded(
+                                  child: activeTodos.isEmpty
+                                      ? const _EmptyState()
+                                      : ReorderableListView.builder(
+                                          buildDefaultDragHandles: false,
+                                          itemCount: activeTodos.length,
+                                          onReorder: _reorderActiveTodos,
+                                          itemBuilder: (context, index) {
+                                            final todo = activeTodos[index];
+                                            return _TodoCard(
+                                              key: ValueKey(todo.id),
+                                              todo: todo,
+                                              compact: _settings.compactMode,
+                                              onToggle: (selected) => _toggleTodo(
+                                                todo.id,
+                                                selected,
+                                              ),
+                                              onEdit: () => _editTodo(todo),
+                                              onDelete: () =>
+                                                  _deleteTodo(todo.id),
+                                              handle:
+                                                  ReorderableDragStartListener(
+                                                index: index,
+                                                child: const Icon(
+                                                  Icons.drag_indicator_rounded,
+                                                  color: Color(0xFF7B8A83),
+                                                  size: 18,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                ),
+                                const SizedBox(height: 16),
+                                _CompletedPanel(
+                                  completedTodos: completedTodos,
+                                  expanded:
+                                      _settings.expandCompletedByDefault,
+                                  compact: _settings.compactMode,
+                                  onToggleExpanded: (value) => _updateSettings(
+                                    _settings.copyWith(
+                                      expandCompletedByDefault: value,
+                                    ),
+                                  ),
+                                  onClearCompleted: completedTodos.isEmpty
+                                      ? null
+                                      : _clearCompleted,
+                                  onToggleTodo: (todo, selected) =>
+                                      _toggleTodo(todo.id, selected),
+                                  onEditTodo: _editTodo,
+                                  onDeleteTodo: (todo) =>
+                                      _deleteTodo(todo.id),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
             ),
           ),
         ),
@@ -927,119 +948,6 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           child: const Text('保存'),
         ),
       ],
-    );
-  }
-}
-
-class _FloatingBallSurface extends StatelessWidget {
-  const _FloatingBallSurface({required this.onOpen});
-
-  final Future<void> Function() onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Center(
-        child: DragToMoveArea(
-          child: GestureDetector(
-            onTap: () {
-              unawaited(onOpen());
-            },
-            child: Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xCC1A7A68),
-                    Color(0xCC3CA692),
-                  ],
-                ),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.78),
-                  width: 2,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF1D6F5F).withValues(alpha: 0.28),
-                    blurRadius: 24,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.checklist_rounded,
-                    color: Colors.white,
-                    size: 28,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Do',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.2,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AttachedBall extends StatelessWidget {
-  const _AttachedBall({required this.onTap});
-
-  final Future<void> Function() onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        unawaited(onTap());
-      },
-      child: Container(
-        width: 68,
-        height: 68,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xD91A7A68),
-              Color(0xD93CA692),
-            ],
-          ),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.82),
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF1D6F5F).withValues(alpha: 0.18),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: const Icon(
-          Icons.checklist_rounded,
-          color: Colors.white,
-          size: 28,
-        ),
-      ),
     );
   }
 }
