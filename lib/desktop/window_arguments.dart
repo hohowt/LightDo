@@ -12,7 +12,16 @@ class LightDoWindowArguments {
   });
 
   factory LightDoWindowArguments.main() {
-    return const LightDoWindowArguments(role: LightDoWindowRole.main);
+    return const LightDoWindowArguments(role: LightDoWindowRole.floatingBall);
+  }
+
+  factory LightDoWindowArguments.editor({
+    required String mainWindowId,
+  }) {
+    return LightDoWindowArguments(
+      role: LightDoWindowRole.main,
+      mainWindowId: mainWindowId,
+    );
   }
 
   factory LightDoWindowArguments.floatingBall({

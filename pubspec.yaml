@@ -38,6 +38,7 @@ dependencies:
   launch_at_startup: ^0.5.1
   system_tray: ^2.0.3
   window_manager: ^0.5.1
+  bitsdojo_window: ^0.1.6
   screen_retriever: ^0.2.0
   desktop_multi_window: ^0.3.0
 

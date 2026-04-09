@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
@@ -15,13 +16,14 @@ import 'services/lightdo_storage.dart';
 
 Future<void> main([List<String> args = const []]) async {
   WidgetsFlutterBinding.ensureInitialized();
-  final launchContext = await _resolveLaunchContext();
+  final launchContext = await _resolveLaunchContext(args);
   await _configureDesktopWindow(launchContext.arguments.role);
 
   if (launchContext.arguments.role == LightDoWindowRole.floatingBall) {
     runApp(
-      FloatingBallApp(mainWindowId: launchContext.arguments.mainWindowId ?? ''),
+      FloatingBallApp(ballWindowId: launchContext.controller?.windowId ?? ''),
     );
+    _configureBitsdojoWindow(launchContext.arguments.role);
     return;
   }
 
@@ -29,13 +31,15 @@ Future<void> main([List<String> args = const []]) async {
     LightDoApp(
       desktopIntegration: createDesktopIntegration(
         currentWindowController: launchContext.controller,
+        ownerWindowId: launchContext.arguments.mainWindowId,
         enabled: true,
       ),
     ),
   );
+  _configureBitsdojoWindow(launchContext.arguments.role);
 }
 
-Future<_LaunchContext> _resolveLaunchContext() async {
+Future<_LaunchContext> _resolveLaunchContext(List<String> args) async {
   if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
     return const _LaunchContext(
       controller: null,
@@ -44,14 +48,30 @@ Future<_LaunchContext> _resolveLaunchContext() async {
   }
 
   await windowManager.ensureInitialized();
+  if (args.isEmpty) {
+    try {
+      final controller = await WindowController.fromCurrentEngine();
+      return _LaunchContext(
+        controller: controller,
+        arguments: LightDoWindowArguments.main(),
+      );
+    } catch (_) {
+      return const _LaunchContext(
+        controller: null,
+        arguments: LightDoWindowArguments(role: LightDoWindowRole.floatingBall),
+      );
+    }
+  }
   try {
     final controller = await WindowController.fromCurrentEngine();
-    final arguments = LightDoWindowArguments.fromEncoded(controller.arguments);
+    final encoded = args.length >= 3 ? args[2] : controller.arguments;
+    final arguments = LightDoWindowArguments.fromEncoded(encoded);
     return _LaunchContext(controller: controller, arguments: arguments);
   } catch (_) {
-    return const _LaunchContext(
+    final encoded = args.length >= 3 ? args[2] : '';
+    return _LaunchContext(
       controller: null,
-      arguments: LightDoWindowArguments(role: LightDoWindowRole.main),
+      arguments: LightDoWindowArguments.fromEncoded(encoded),
     );
   }
 }
@@ -62,16 +82,18 @@ Future<void> _configureDesktopWindow(LightDoWindowRole role) async {
   }
 
   final options = role == LightDoWindowRole.floatingBall
-      ? const WindowOptions(
-          size: Size(76, 76),
-          minimumSize: Size(76, 76),
+      ? WindowOptions(
+          size: const Size(76, 76),
+          minimumSize: const Size(76, 76),
           center: false,
           title: 'LightDo',
           backgroundColor: Colors.transparent,
           alwaysOnTop: true,
           skipTaskbar: true,
-          titleBarStyle: TitleBarStyle.hidden,
-          windowButtonVisibility: false,
+          titleBarStyle: Platform.isMacOS
+              ? TitleBarStyle.normal
+              : TitleBarStyle.hidden,
+          windowButtonVisibility: !Platform.isMacOS,
         )
       : const WindowOptions(
           size: Size(420, 640),
@@ -79,12 +101,33 @@ Future<void> _configureDesktopWindow(LightDoWindowRole role) async {
           center: true,
           title: 'LightDo',
           backgroundColor: Color(0xFFF7F4ED),
-          titleBarStyle: TitleBarStyle.hidden,
-          windowButtonVisibility: false,
         );
   await windowManager.waitUntilReadyToShow(options, () async {
-    await windowManager.show();
-    await windowManager.focus();
+    if (role == LightDoWindowRole.floatingBall && !Platform.isMacOS) {
+      await windowManager.show();
+      await windowManager.focus();
+    }
+  });
+}
+
+void _configureBitsdojoWindow(LightDoWindowRole role) {
+  if (!Platform.isMacOS) {
+    return;
+  }
+
+  doWhenWindowReady(() {
+    final win = appWindow;
+    if (role == LightDoWindowRole.floatingBall) {
+      const ballSize = Size(76, 76);
+      win.minSize = ballSize;
+      win.maxSize = ballSize;
+      win.size = ballSize;
+      win.show();
+      return;
+    }
+
+    const editorMinSize = Size(360, 520);
+    win.minSize = editorMinSize;
   });
 }
 

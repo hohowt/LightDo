@@ -1,20 +1,18 @@
 import Cocoa
 import FlutterMacOS
+import bitsdojo_window_macos
 import desktop_multi_window
 
-class MainFlutterWindow: NSWindow {
+class MainFlutterWindow: BitsdojoWindow {
+  override func bitsdojo_window_configure() -> UInt {
+    BDW_CUSTOM_FRAME | BDW_HIDE_ON_STARTUP
+  }
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
-    flutterViewController.backgroundColor = .clear
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
-    self.isOpaque = false
-    self.backgroundColor = .clear
-    self.titlebarAppearsTransparent = true
-    self.isMovableByWindowBackground = false
-    self.contentView?.wantsLayer = true
-    self.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in

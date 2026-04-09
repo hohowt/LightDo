@@ -10,26 +10,27 @@ import 'package:screen_retriever/screen_retriever.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'window_arguments.dart';
 import '../services/lightdo_storage.dart';
 
 class FloatingBallApp extends StatelessWidget {
-  const FloatingBallApp({super.key, required this.mainWindowId});
+  const FloatingBallApp({super.key, required this.ballWindowId});
 
-  final String mainWindowId;
+  final String ballWindowId;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: FloatingBallHome(mainWindowId: mainWindowId),
+      home: FloatingBallHome(ballWindowId: ballWindowId),
     );
   }
 }
 
 class FloatingBallHome extends StatefulWidget {
-  const FloatingBallHome({super.key, required this.mainWindowId});
+  const FloatingBallHome({super.key, required this.ballWindowId});
 
-  final String mainWindowId;
+  final String ballWindowId;
 
   @override
   State<FloatingBallHome> createState() => _FloatingBallHomeState();
@@ -37,6 +38,10 @@ class FloatingBallHome extends StatefulWidget {
 
 class _FloatingBallHomeState extends State<FloatingBallHome>
     with WindowListener {
+  static const Size _ballWindowSize = Size(76, 76);
+  static const double _launchTopPadding = 28;
+  static const double _launchRightPadding = 24;
+
   final LightDoStorage _storage = const FileLightDoStorage();
   final SystemTray _systemTray = SystemTray();
   final Menu _trayMenu = Menu();
@@ -46,6 +51,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   );
 
   WindowController? _currentController;
+  WindowController? _editorWindowController;
   bool _trayReady = false;
   bool _hotKeyEnabled = true;
   bool _launchAtStartupEnabled = false;
@@ -88,10 +94,55 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
       }
     });
     windowManager.addListener(this);
+    await _prepareFloatingBallWindow();
     await _loadSettings();
+    unawaited(_warmUpEditorWindow());
     if (Platform.isWindows) {
       await _setupTray();
     }
+  }
+
+  Future<void> _prepareFloatingBallWindow() async {
+    await windowManager.setBackgroundColor(Colors.transparent);
+    await windowManager.setResizable(false);
+    await windowManager.setMinimumSize(_ballWindowSize);
+    await windowManager.setMaximumSize(_ballWindowSize);
+    await windowManager.setAlwaysOnTop(true);
+    await _positionFloatingBallAtLaunch();
+  }
+
+  Future<void> _positionFloatingBallAtLaunch() async {
+    final display = await screenRetriever.getPrimaryDisplay();
+    final visiblePosition = display.visiblePosition ?? Offset.zero;
+    final visibleSize = display.visibleSize ?? display.size;
+    final left =
+        visiblePosition.dx +
+        visibleSize.width -
+        _ballWindowSize.width -
+        _launchRightPadding;
+    final top = visiblePosition.dy + _launchTopPadding;
+    await windowManager.setBounds(
+      Rect.fromLTWH(left, top, _ballWindowSize.width, _ballWindowSize.height),
+    );
+  }
+
+  Future<void> _spawnEditorWindowIfNeeded() async {
+    if (_editorWindowController != null || _currentController == null) {
+      return;
+    }
+    _editorWindowController = await WindowController.create(
+      WindowConfiguration(
+        hiddenAtLaunch: true,
+        arguments: LightDoWindowArguments.editor(
+          mainWindowId: _currentController!.windowId,
+        ).encode(),
+      ),
+    );
+  }
+
+  Future<void> _warmUpEditorWindow() async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await _spawnEditorWindowIfNeeded();
   }
 
   Future<void> _loadSettings() async {
@@ -189,7 +240,11 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   }
 
   Future<void> _openMainWindow() async {
-    final controller = WindowController.fromWindowId(widget.mainWindowId);
+    await _spawnEditorWindowIfNeeded();
+    final controller = _editorWindowController;
+    if (controller == null) {
+      return;
+    }
     final position = await windowManager.getPosition();
     final size = await windowManager.getSize();
     final display = await _resolveDisplayForBall(position, size);
@@ -199,7 +254,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     final side = centerX >= visiblePosition.dx + visibleSize.width / 2
         ? 'right'
         : 'left';
-    await controller.invokeMethod('showMainAtBall', {
+    final payload = {
       'ballX': position.dx,
       'ballY': position.dy,
       'ballWidth': size.width,
@@ -209,7 +264,27 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
       'visibleWidth': visibleSize.width,
       'visibleHeight': visibleSize.height,
       'anchorSide': side,
-    });
+    };
+    await _invokeMainWindowWhenReady(controller, payload);
+  }
+
+  Future<void> _invokeMainWindowWhenReady(
+    WindowController controller,
+    Map<String, dynamic> payload,
+  ) async {
+    Object? lastError;
+    for (var i = 0; i < 12; i++) {
+      try {
+        await controller.invokeMethod('showMainAtBall', payload);
+        return;
+      } catch (error) {
+        lastError = error;
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      }
+    }
+    if (lastError != null) {
+      throw lastError;
+    }
   }
 
   Future<Display> _resolveDisplayForBall(Offset position, Size size) async {
