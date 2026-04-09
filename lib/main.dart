@@ -22,7 +22,7 @@ Future<void> _configureDesktopWindow() async {
   }
 
   await windowManager.ensureInitialized();
-  final options = Platform.isWindows
+  final options = (Platform.isWindows || Platform.isMacOS)
       ? const WindowOptions(
           size: Size(76, 76),
           minimumSize: Size(76, 76),
@@ -861,7 +861,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 });
               },
             ),
-            if (Platform.isWindows) ...[
+            if (Platform.isWindows || Platform.isMacOS) ...[
               const Divider(height: 8),
               SwitchListTile(
                 value: _draft.alwaysOnTop,
@@ -896,7 +896,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               SwitchListTile(
                 value: _draft.launchAtStartup,
                 title: const Text('开机自启'),
-                subtitle: const Text('在 Windows 登录后自动启动 LightDo。'),
+                subtitle: const Text('在系统登录后自动启动 LightDo。'),
                 onChanged: (value) {
                   setState(() {
                     _draft = _draft.copyWith(launchAtStartup: value);

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lightdo/main.dart';
 import 'package:lightdo/models/app_settings.dart';
 import 'package:lightdo/models/app_snapshot.dart';
+import 'package:lightdo/services/desktop_integration.dart';
 import 'package:lightdo/models/todo_item.dart';
 import 'package:lightdo/services/lightdo_storage.dart';
 
@@ -14,7 +15,10 @@ void main() {
     );
 
     await tester.pumpWidget(
-      LightDoApp(storage: MemoryLightDoStorage(snapshot)),
+      LightDoApp(
+        storage: MemoryLightDoStorage(snapshot),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -24,7 +28,10 @@ void main() {
 
   testWidgets('adds todo item from input', (tester) async {
     await tester.pumpWidget(
-      LightDoApp(storage: MemoryLightDoStorage()),
+      LightDoApp(
+        storage: MemoryLightDoStorage(),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
     );
     await tester.pumpAndSettle();
 

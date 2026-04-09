@@ -18,7 +18,7 @@ enum DesktopSurfaceMode {
 }
 
 DesktopIntegration createDesktopIntegration() {
-  if (Platform.isWindows) {
+  if (Platform.isWindows || Platform.isMacOS) {
     return WindowsDesktopIntegration();
   }
   return NoopDesktopIntegration();
@@ -108,7 +108,9 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
 
     _settings = settings;
     await _setupLaunchAtStartup();
-    await _setupTray();
+    if (Platform.isWindows) {
+      await _setupTray();
+    }
     _windowManager.addListener(this);
     _initialized = true;
     await applySettings(settings);
@@ -130,7 +132,9 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
       await _windowManager.setAlwaysOnTop(settings.alwaysOnTop);
     }
 
-    await _syncTrayMenu();
+    if (Platform.isWindows) {
+      await _syncTrayMenu();
+    }
   }
 
   @override
@@ -141,7 +145,9 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
     _disposed = true;
     _windowManager.removeListener(this);
     await hotKeyManager.unregisterAll();
-    await _systemTray.destroy();
+    if (Platform.isWindows) {
+      await _systemTray.destroy();
+    }
   }
 
   @override
@@ -174,7 +180,9 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
     await _windowManager.show();
     await _windowManager.focus();
     _modeNotifier.value = DesktopSurfaceMode.main;
-    await _syncTrayMenu();
+    if (Platform.isWindows) {
+      await _syncTrayMenu();
+    }
   }
 
   @override
@@ -193,7 +201,9 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
     await _windowManager.show();
     await _windowManager.focus();
     _modeNotifier.value = DesktopSurfaceMode.floatingBall;
-    await _syncTrayMenu();
+    if (Platform.isWindows) {
+      await _syncTrayMenu();
+    }
   }
 
   Future<void> exitApplication() async {
@@ -203,7 +213,9 @@ class WindowsDesktopIntegration extends DesktopIntegration with WindowListener {
 
   Future<void> _cleanupAndDestroy() async {
     await hotKeyManager.unregisterAll();
-    await _systemTray.destroy();
+    if (Platform.isWindows) {
+      await _systemTray.destroy();
+    }
     await _windowManager.destroy();
   }
 

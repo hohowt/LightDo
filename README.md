@@ -13,12 +13,12 @@ LightDo 当前分支为 Flutter 重构版，一个面向桌面场景的轻量待
 - 本地 JSON 持久化
 - 顶部统计信息与空状态展示
 - 基础设置面板
-- Windows 启动即悬浮球入口
+- Windows/macOS 启动即悬浮球入口
 - 悬浮球点击展开主窗口，关闭主窗口回到悬浮球
 - Windows 托盘隐藏与恢复
-- Windows 全局快捷键 `Alt+Shift+T`
-- Windows 窗口置顶
-- Windows 开机自启设置
+- 桌面端全局快捷键 `Alt+Shift+T`
+- 桌面端窗口置顶
+- 桌面端开机自启设置
 - 主窗口改为非透明窗口，避免中文输入法异常
 - `flutter analyze` 与 `flutter test` 通过
 
@@ -73,5 +73,5 @@ LightDo/
 
 - 原有 Electron 配置文件仍保留在仓库中，便于对照历史方案。
 - 这条分支以 Flutter 版可运行待办应用为目标，不再把旧 README 中的桌面系统能力视为已实现事实。
-- Windows 能力当前通过 Flutter 桌面插件实现，入口逻辑在 `lib/services/desktop_integration.dart`。
+- 桌面集成能力当前通过 Flutter 桌面插件实现，入口逻辑在 `lib/services/desktop_integration.dart`。
 - 中文输入问题本轮通过取消主窗口透明背景并恢复正常窗口态处理。
