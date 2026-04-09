@@ -204,6 +204,17 @@ Win32Window::MessageHandler(HWND hwnd,
         MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
                    rect.bottom - rect.top, TRUE);
       }
+      // Apply circular clipping for small windows (floating ball).
+      RECT wr;
+      GetWindowRect(hwnd, &wr);
+      int w = wr.right - wr.left;
+      int h = wr.bottom - wr.top;
+      if (w <= 100 && h <= 100) {
+        HRGN rgn = CreateEllipticRgn(0, 0, w, h);
+        SetWindowRgn(hwnd, rgn, TRUE);
+      } else {
+        SetWindowRgn(hwnd, nullptr, TRUE);
+      }
       return 0;
     }
 

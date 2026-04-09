@@ -21,7 +21,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
@@ -58,18 +58,22 @@ jobs:
         include:
           - name: macOS x64
             artifact_suffix: macos-x64
-            runner: macos-13
+            runner: macos-14
             build_shell: bash
             archive_shell: bash
             build_command: flutter build macos --release --build-name="${VERSION}" --build-number="${BUILD_NUMBER}"
-            archive_command: ditto -c -k --sequesterRsrc --keepParent "build/macos/Build/Products/Release/lightdo.app" "dist/lightdo-${TAG_NAME}-macos-x64.zip"
+            archive_command: |
+              mkdir -p dist
+              ditto -c -k --sequesterRsrc --keepParent "build/macos/Build/Products/Release/lightdo.app" "dist/lightdo-${TAG_NAME}-macos-x64.zip"
           - name: macOS arm64
             artifact_suffix: macos-arm64
             runner: macos-14
             build_shell: bash
             archive_shell: bash
             build_command: flutter build macos --release --build-name="${VERSION}" --build-number="${BUILD_NUMBER}"
-            archive_command: ditto -c -k --sequesterRsrc --keepParent "build/macos/Build/Products/Release/lightdo.app" "dist/lightdo-${TAG_NAME}-macos-arm64.zip"
+            archive_command: |
+              mkdir -p dist
+              ditto -c -k --sequesterRsrc --keepParent "build/macos/Build/Products/Release/lightdo.app" "dist/lightdo-${TAG_NAME}-macos-arm64.zip"
           - name: Windows x64
             artifact_suffix: windows-x64
             runner: windows-2022
@@ -101,25 +105,13 @@ jobs:
       BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@e938fdf56512cc96ef2f93601a5c50a6d541ff0d # v2.18.1
         with:
-          channel: stable
+          flutter-version: '3.41.6'
           cache: true
-
-      - name: Enable desktop support
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            flutter config --enable-macos-desktop
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
-            flutter config --enable-windows-desktop
-          else
-            flutter config --enable-linux-desktop
-          fi
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -127,7 +119,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libappindicator3-dev
 
       - name: Install dependencies
         run: flutter pub get
@@ -141,7 +133,7 @@ jobs:
         run: ${{ matrix.archive_command }}
 
       - name: Upload packaged artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ matrix.artifact_suffix }}
           path: |
@@ -157,14 +149,14 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Download packaged artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: release-*
           path: release-assets
           merge-multiple: true
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
           tag_name: ${{ needs.verify-release-tag.outputs.tag_name }}
           files: release-assets/*

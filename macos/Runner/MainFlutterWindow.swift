@@ -8,6 +8,10 @@ class MainFlutterWindow: BitsdojoWindow {
     BDW_CUSTOM_FRAME | BDW_HIDE_ON_STARTUP
   }
 
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    return frameRect
+  }
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
