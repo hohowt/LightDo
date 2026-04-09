@@ -1,20 +1,45 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'models/app_settings.dart';
 import 'models/app_snapshot.dart';
 import 'models/todo_item.dart';
+import 'services/desktop_integration.dart';
 import 'services/lightdo_storage.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await _configureDesktopWindow();
   runApp(const LightDoApp());
 }
 
+Future<void> _configureDesktopWindow() async {
+  if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+    return;
+  }
+
+  await windowManager.ensureInitialized();
+  const options = WindowOptions(
+    size: Size(1180, 780),
+    minimumSize: Size(900, 620),
+    center: true,
+    title: 'LightDo',
+    backgroundColor: Colors.transparent,
+  );
+  await windowManager.waitUntilReadyToShow(options, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
+}
+
 class LightDoApp extends StatelessWidget {
-  const LightDoApp({super.key, this.storage});
+  const LightDoApp({super.key, this.storage, this.desktopIntegration});
 
   final LightDoStorage? storage;
+  final DesktopIntegration? desktopIntegration;
 
   @override
   Widget build(BuildContext context) {
@@ -30,15 +55,23 @@ class LightDoApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF4F1E8),
         fontFamily: 'SF Pro Display',
       ),
-      home: LightDoHomePage(storage: storage ?? const FileLightDoStorage()),
+      home: LightDoHomePage(
+        storage: storage ?? const FileLightDoStorage(),
+        desktopIntegration: desktopIntegration ?? createDesktopIntegration(),
+      ),
     );
   }
 }
 
 class LightDoHomePage extends StatefulWidget {
-  const LightDoHomePage({super.key, required this.storage});
+  const LightDoHomePage({
+    super.key,
+    required this.storage,
+    required this.desktopIntegration,
+  });
 
   final LightDoStorage storage;
+  final DesktopIntegration desktopIntegration;
 
   @override
   State<LightDoHomePage> createState() => _LightDoHomePageState();
@@ -52,6 +85,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   bool _isLoading = true;
   String? _errorMessage;
   Timer? _saveTimer;
+  bool _desktopInitialized = false;
 
   @override
   void initState() {
@@ -63,6 +97,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   void dispose() {
     _saveTimer?.cancel();
     _inputController.dispose();
+    unawaited(widget.desktopIntegration.dispose());
     super.dispose();
   }
 
@@ -77,6 +112,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
         _settings = snapshot.settings;
         _isLoading = false;
       });
+      unawaited(_initializeDesktopIntegration());
     } catch (_) {
       if (!mounted) {
         return;
@@ -84,6 +120,24 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
       setState(() {
         _isLoading = false;
         _errorMessage = '本地数据读取失败，已回退为空列表。';
+      });
+      unawaited(_initializeDesktopIntegration());
+    }
+  }
+
+  Future<void> _initializeDesktopIntegration() async {
+    if (_desktopInitialized) {
+      return;
+    }
+    try {
+      await widget.desktopIntegration.initialize(_settings);
+      _desktopInitialized = true;
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorMessage = 'Windows 桌面能力初始化失败，核心待办功能仍可使用。';
       });
     }
   }
@@ -235,7 +289,21 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     setState(() {
       _settings = nextSettings;
     });
+    unawaited(_applyDesktopSettings(nextSettings));
     _scheduleSave();
+  }
+
+  Future<void> _applyDesktopSettings(AppSettings nextSettings) async {
+    try {
+      await widget.desktopIntegration.applySettings(nextSettings);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorMessage = 'Windows 设置应用失败，已保留当前任务数据。';
+      });
+    }
   }
 
   List<TodoItem> get _activeTodos =>
@@ -279,6 +347,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                             activeCount: activeTodos.length,
                             completedCount: completedTodos.length,
                             completedRate: completedRate,
+                            showWindowsBadge: Platform.isWindows,
                             onOpenSettings: () => _openSettingsSheet(context),
                           ),
                           const SizedBox(height: 20),
@@ -391,6 +460,7 @@ class _HeaderSection extends StatelessWidget {
     required this.activeCount,
     required this.completedCount,
     required this.completedRate,
+    required this.showWindowsBadge,
     required this.onOpenSettings,
   });
 
@@ -398,6 +468,7 @@ class _HeaderSection extends StatelessWidget {
   final int activeCount;
   final int completedCount;
   final int completedRate;
+  final bool showWindowsBadge;
   final VoidCallback onOpenSettings;
 
   @override
@@ -447,6 +518,8 @@ class _HeaderSection extends StatelessWidget {
               _StatPill(label: '进行中', value: '$activeCount'),
               _StatPill(label: '已完成', value: '$completedCount'),
               _StatPill(label: '完成率', value: '$completedRate%'),
+              if (showWindowsBadge)
+                const _StatPill(label: 'Windows', value: '桌面增强'),
             ],
           ),
         ],
@@ -762,6 +835,49 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 });
               },
             ),
+            if (Platform.isWindows) ...[
+              const Divider(height: 8),
+              SwitchListTile(
+                value: _draft.alwaysOnTop,
+                title: const Text('窗口始终置顶'),
+                subtitle: const Text('保持窗口在其他应用前方显示。'),
+                onChanged: (value) {
+                  setState(() {
+                    _draft = _draft.copyWith(alwaysOnTop: value);
+                  });
+                },
+              ),
+              SwitchListTile(
+                value: _draft.minimizeToTrayOnClose,
+                title: const Text('关闭时隐藏到托盘'),
+                subtitle: const Text('点击关闭按钮后不退出，只隐藏到系统托盘。'),
+                onChanged: (value) {
+                  setState(() {
+                    _draft = _draft.copyWith(minimizeToTrayOnClose: value);
+                  });
+                },
+              ),
+              SwitchListTile(
+                value: _draft.enableGlobalHotkey,
+                title: const Text('启用全局快捷键 Alt+Shift+T'),
+                subtitle: const Text('无论窗口是否激活，都可显示或隐藏 LightDo。'),
+                onChanged: (value) {
+                  setState(() {
+                    _draft = _draft.copyWith(enableGlobalHotkey: value);
+                  });
+                },
+              ),
+              SwitchListTile(
+                value: _draft.launchAtStartup,
+                title: const Text('开机自启'),
+                subtitle: const Text('在 Windows 登录后自动启动 LightDo。'),
+                onChanged: (value) {
+                  setState(() {
+                    _draft = _draft.copyWith(launchAtStartup: value);
+                  });
+                },
+              ),
+            ],
           ],
         ),
       ),
