@@ -41,4 +41,48 @@ void main() {
 
     expect(find.text('补齐 Flutter 页面'), findsOneWidget);
   });
+
+  testWidgets('completing recurring todo creates next occurrence', (
+    tester,
+  ) async {
+    final recurringTodo = TodoItem.create(
+      title: '写周报',
+      dueAt: DateTime(2026, 4, 10, 18, 0),
+      recurrence: TodoRecurrence.weekly,
+    );
+
+    await tester.pumpWidget(
+      LightDoApp(
+        storage: MemoryLightDoStorage(
+          AppSnapshot(todos: [recurringTodo], settings: AppSettings.defaults()),
+        ),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(Checkbox).first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('写周报'), findsNWidgets(2));
+  });
+
+  testWidgets('renders overdue badge for expired todo', (tester) async {
+    final expiredTodo = TodoItem.create(
+      title: '提交报销',
+      dueAt: DateTime.now().subtract(const Duration(hours: 1)),
+    );
+
+    await tester.pumpWidget(
+      LightDoApp(
+        storage: MemoryLightDoStorage(
+          AppSnapshot(todos: [expiredTodo], settings: AppSettings.defaults()),
+        ),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('已过期'), findsOneWidget);
+  });
 }

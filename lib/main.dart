@@ -182,6 +182,8 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
 
   List<TodoItem> _todos = const [];
   AppSettings _settings = AppSettings.defaults();
+  DateTime? _composerDueAt;
+  TodoRecurrence _composerRecurrence = TodoRecurrence.none;
   bool _isLoading = true;
   String? _errorMessage;
   Timer? _saveTimer;
@@ -273,69 +275,116 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     if (text.isEmpty) {
       return;
     }
-    final nextTodo = TodoItem.create(title: text);
+    final nextTodo = TodoItem.create(
+      title: text,
+      dueAt: _composerDueAt,
+      recurrence: _composerRecurrence,
+    );
     setState(() {
       _todos = [nextTodo, ..._todos];
       _inputController.clear();
+      _composerDueAt = null;
+      _composerRecurrence = TodoRecurrence.none;
     });
     _scheduleSave();
   }
 
   void _toggleTodo(String id, bool selected) {
+    TodoItem? targetTodo;
+    for (final todo in _todos) {
+      if (todo.id == id) {
+        targetTodo = todo;
+        break;
+      }
+    }
+    if (targetTodo == null) {
+      return;
+    }
+
+    final nextRecurringTodo = selected && !targetTodo.isCompleted
+        ? targetTodo.createNextRecurringInstance()
+        : null;
+
     setState(() {
-      _todos = _todos
+      final updatedTodos = _todos
           .map(
             (todo) =>
                 todo.id == id ? todo.copyWith(isCompleted: selected) : todo,
+          )
+          .toList(growable: true);
+
+      if (nextRecurringTodo != null &&
+          !_containsRecurringInstance(updatedTodos, nextRecurringTodo)) {
+        updatedTodos.insert(0, nextRecurringTodo);
+      }
+
+      _todos = updatedTodos;
+    });
+    _scheduleSave();
+  }
+
+  Future<void> _editTodo(TodoItem todo) async {
+    final result = await showDialog<_TodoEditorResult>(
+      context: context,
+      builder: (context) => _TodoEditorDialog(todo: todo),
+    );
+    final trimmed = result?.title.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return;
+    }
+
+    final noTitleChange = trimmed == todo.title;
+    final noDueChange =
+        (result?.dueAt == null && todo.dueAt == null) ||
+        (result?.dueAt != null &&
+            todo.dueAt != null &&
+            result!.dueAt!.isAtSameMomentAs(todo.dueAt!));
+    final noRecurrenceChange =
+        (result?.recurrence ?? todo.recurrence) == todo.recurrence;
+
+    if (noTitleChange && noDueChange && noRecurrenceChange) {
+      return;
+    }
+
+    setState(() {
+      _todos = _todos
+          .map(
+            (item) => item.id == todo.id
+                ? item.copyWith(
+                    title: trimmed,
+                    dueAt: result?.dueAt,
+                    recurrence: result?.recurrence,
+                  )
+                : item,
           )
           .toList(growable: false);
     });
     _scheduleSave();
   }
 
-  Future<void> _editTodo(TodoItem todo) async {
-    final controller = TextEditingController(text: todo.title);
-    final nextTitle = await showDialog<String>(
+  Future<void> _openComposerScheduleDialog() async {
+    final result = await showDialog<_TodoScheduleDraft>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('编辑任务'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: '任务内容',
-              hintText: '输入新的任务描述',
-            ),
-            onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.of(context).pop(controller.text.trim()),
-              child: const Text('保存'),
-            ),
-          ],
-        );
-      },
+      builder: (context) => _TodoScheduleDialog(
+        title: '设置截止时间',
+        initialDueAt: _composerDueAt,
+        initialRecurrence: _composerRecurrence,
+      ),
     );
-    controller.dispose();
-    final trimmed = nextTitle?.trim() ?? '';
-    if (trimmed.isEmpty || trimmed == todo.title) {
+    if (result == null || !mounted) {
       return;
     }
     setState(() {
-      _todos = _todos
-          .map(
-            (item) => item.id == todo.id ? item.copyWith(title: trimmed) : item,
-          )
-          .toList(growable: false);
+      _composerDueAt = result.dueAt;
+      _composerRecurrence = result.recurrence;
     });
-    _scheduleSave();
+  }
+
+  void _clearComposerSchedule() {
+    setState(() {
+      _composerDueAt = null;
+      _composerRecurrence = TodoRecurrence.none;
+    });
   }
 
   void _deleteTodo(String id) {
@@ -425,6 +474,18 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   List<TodoItem> get _completedTodos =>
       _todos.where((todo) => todo.isCompleted).toList(growable: false);
 
+  bool _containsRecurringInstance(List<TodoItem> todos, TodoItem candidate) {
+    return todos.any((todo) {
+      final sameSeries =
+          todo.seriesId != null && todo.seriesId == candidate.seriesId;
+      final sameDueAt =
+          todo.dueAt != null &&
+          candidate.dueAt != null &&
+          todo.dueAt!.isAtSameMomentAs(candidate.dueAt!);
+      return sameSeries && sameDueAt;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeTodos = _activeTodos;
@@ -461,6 +522,16 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                         _ComposerCard(
                           controller: _inputController,
                           onSubmit: _addTodo,
+                          onOpenSchedule: _openComposerScheduleDialog,
+                          onClearSchedule: _clearComposerSchedule,
+                          scheduleSummary: _composerDueAt == null
+                              ? null
+                              : [
+                                  formatShortDateTime(_composerDueAt!),
+                                  if (_composerRecurrence !=
+                                      TodoRecurrence.none)
+                                    _composerRecurrence.label,
+                                ].join(' · '),
                         ),
                         if (_errorMessage != null) ...[
                           const SizedBox(height: 12),
@@ -622,10 +693,19 @@ class _HeaderSection extends StatelessWidget {
 }
 
 class _ComposerCard extends StatelessWidget {
-  const _ComposerCard({required this.controller, required this.onSubmit});
+  const _ComposerCard({
+    required this.controller,
+    required this.onSubmit,
+    required this.onOpenSchedule,
+    required this.onClearSchedule,
+    required this.scheduleSummary,
+  });
 
   final TextEditingController controller;
   final VoidCallback onSubmit;
+  final VoidCallback onOpenSchedule;
+  final VoidCallback onClearSchedule;
+  final String? scheduleSummary;
 
   @override
   Widget build(BuildContext context) {
@@ -634,27 +714,74 @@ class _ComposerCard extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Color(0xFFD9DED4))),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(right: 10),
-            child: Icon(Icons.add_rounded, color: Color(0xFF6C7A74)),
-          ),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onSubmitted: (_) => onSubmit(),
-              decoration: const InputDecoration(
-                hintText: '添加待办，按回车确认',
-                isCollapsed: true,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 10),
+          Row(
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(right: 10),
+                child: Icon(Icons.add_rounded, color: Color(0xFF6C7A74)),
               ),
-            ),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  onSubmitted: (_) => onSubmit(),
+                  decoration: const InputDecoration(
+                    hintText: '添加待办，按回车确认',
+                    isCollapsed: true,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: onOpenSchedule,
+                icon: Icon(
+                  scheduleSummary == null
+                      ? Icons.event_outlined
+                      : Icons.event_available_rounded,
+                ),
+                tooltip: '设置截止时间',
+                color: scheduleSummary == null
+                    ? const Color(0xFF6C7A74)
+                    : const Color(0xFF1D6F5F),
+              ),
+              TextButton(onPressed: onSubmit, child: const Text('添加')),
+            ],
           ),
-          TextButton(onPressed: onSubmit, child: const Text('添加')),
+          if (scheduleSummary != null) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE9EFE8),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    scheduleSummary!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF335049),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: onClearSchedule,
+                  child: const Text('清除时间'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -821,20 +948,55 @@ class _TodoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final deadlineState = todo.deadlineStateAt(now);
+    final deadlineBadge = todo.deadlineBadgeLabelAt(now);
+    final visualState = todo.isCompleted
+        ? TodoDeadlineState.normal
+        : deadlineState;
+    final cardBackground = switch (visualState) {
+      TodoDeadlineState.overdue => const Color(0xFFFFF0EC),
+      TodoDeadlineState.dueSoon => const Color(0xFFFFF8E5),
+      TodoDeadlineState.normal => Colors.transparent,
+    };
+    final cardBorder = switch (visualState) {
+      TodoDeadlineState.overdue => const Color(0xFFE07A63),
+      TodoDeadlineState.dueSoon => const Color(0xFFD3A446),
+      TodoDeadlineState.normal => const Color(0xFFE2E5DD),
+    };
+    final badgeBackground = switch (visualState) {
+      TodoDeadlineState.overdue => const Color(0xFFF7D2C8),
+      TodoDeadlineState.dueSoon => const Color(0xFFF5E2B3),
+      TodoDeadlineState.normal => Colors.transparent,
+    };
+    final badgeForeground = switch (visualState) {
+      TodoDeadlineState.overdue => const Color(0xFFAC4C3A),
+      TodoDeadlineState.dueSoon => const Color(0xFF94691A),
+      TodoDeadlineState.normal => const Color(0xFF728781),
+    };
+    final summaryColor = switch (visualState) {
+      TodoDeadlineState.overdue => const Color(0xFFB36456),
+      TodoDeadlineState.dueSoon => const Color(0xFF9B7626),
+      TodoDeadlineState.normal => const Color(0xFF728781),
+    };
     final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
       fontWeight: FontWeight.w600,
       height: 1.25,
       color: todo.isCompleted
           ? const Color(0xFF6F837D)
+          : visualState == TodoDeadlineState.overdue
+          ? const Color(0xFF7E2F22)
+          : visualState == TodoDeadlineState.dueSoon
+          ? const Color(0xFF7D5D17)
           : const Color(0xFF203B35),
       decoration: todo.isCompleted ? TextDecoration.lineThrough : null,
     );
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.transparent,
+        color: cardBackground,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E5DD)),
+        border: Border.all(color: cardBorder, width: 1.2),
       ),
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 10 : 12,
@@ -851,13 +1013,38 @@ class _TodoCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(todo.title, style: titleStyle),
+                Row(
+                  children: [
+                    Expanded(child: Text(todo.title, style: titleStyle)),
+                    if (deadlineBadge != null) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: badgeBackground,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          deadlineBadge,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: badgeForeground,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
                 const SizedBox(height: 4),
                 Text(
                   todo.summary,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF728781),
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: summaryColor),
                 ),
               ],
             ),
@@ -873,6 +1060,279 @@ class _TodoCard extends StatelessWidget {
             tooltip: '删除',
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _TodoScheduleDraft {
+  const _TodoScheduleDraft({required this.dueAt, required this.recurrence});
+
+  final DateTime? dueAt;
+  final TodoRecurrence recurrence;
+}
+
+class _TodoEditorResult extends _TodoScheduleDraft {
+  const _TodoEditorResult({
+    required this.title,
+    required super.dueAt,
+    required super.recurrence,
+  });
+
+  final String title;
+}
+
+class _TodoScheduleDialog extends StatefulWidget {
+  const _TodoScheduleDialog({
+    required this.title,
+    required this.initialDueAt,
+    required this.initialRecurrence,
+  });
+
+  final String title;
+  final DateTime? initialDueAt;
+  final TodoRecurrence initialRecurrence;
+
+  @override
+  State<_TodoScheduleDialog> createState() => _TodoScheduleDialogState();
+}
+
+class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
+  late DateTime? _draftDueAt = widget.initialDueAt;
+  late TodoRecurrence _draftRecurrence = widget.initialDueAt == null
+      ? TodoRecurrence.none
+      : widget.initialRecurrence;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _draftDueAt == null
+                  ? '未设置截止时间'
+                  : '截止 ${formatShortDateTime(_draftDueAt!)}',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _pickDueAt,
+                  icon: const Icon(Icons.event_available_rounded),
+                  label: Text(_draftDueAt == null ? '选择时间' : '重新选择'),
+                ),
+                if (_draftDueAt != null)
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _draftDueAt = null;
+                        _draftRecurrence = TodoRecurrence.none;
+                      });
+                    },
+                    child: const Text('清除'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<TodoRecurrence>(
+              key: ValueKey(_draftRecurrence),
+              initialValue: _draftRecurrence,
+              decoration: const InputDecoration(
+                labelText: '定时任务',
+                border: OutlineInputBorder(),
+              ),
+              items: TodoRecurrence.values
+                  .map(
+                    (value) => DropdownMenuItem(
+                      value: value,
+                      child: Text(value.label),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: _draftDueAt == null
+                  ? null
+                  : (value) {
+                      if (value == null) {
+                        return;
+                      }
+                      setState(() {
+                        _draftRecurrence = value;
+                      });
+                    },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _draftDueAt == null
+                  ? '先设置截止时间后才能启用重复任务。'
+                  : '可选每天、每周或每月重复生成下一次任务。',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: const Color(0xFF6D827C)),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(
+            _TodoScheduleDraft(
+              dueAt: _draftDueAt,
+              recurrence: _draftDueAt == null
+                  ? TodoRecurrence.none
+                  : _draftRecurrence,
+            ),
+          ),
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickDueAt() async {
+    final now = DateTime.now();
+    final initial = _draftDueAt ?? now.add(const Duration(hours: 1));
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+    );
+    if (date == null || !mounted) {
+      return;
+    }
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial),
+    );
+    if (time == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _draftDueAt = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+      _draftRecurrence = _draftRecurrence;
+    });
+  }
+}
+
+class _TodoEditorDialog extends StatefulWidget {
+  const _TodoEditorDialog({required this.todo});
+
+  final TodoItem todo;
+
+  @override
+  State<_TodoEditorDialog> createState() => _TodoEditorDialogState();
+}
+
+class _TodoEditorDialogState extends State<_TodoEditorDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.todo.title,
+  );
+  late DateTime? _draftDueAt = widget.todo.dueAt;
+  late TodoRecurrence _draftRecurrence = widget.todo.recurrence;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('编辑任务'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '任务内容',
+                hintText: '输入新的任务描述',
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: _openScheduleDialog,
+              icon: const Icon(Icons.event_note_rounded),
+              label: Text(
+                _draftDueAt == null
+                    ? '设置截止时间'
+                    : '截止 ${formatShortDateTime(_draftDueAt!)}',
+              ),
+            ),
+            if (_draftDueAt != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _draftRecurrence == TodoRecurrence.none
+                    ? '当前任务不重复'
+                    : '当前任务按 ${_draftRecurrence.label} 重复',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: const Color(0xFF6D827C)),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('保存')),
+      ],
+    );
+  }
+
+  Future<void> _openScheduleDialog() async {
+    final result = await showDialog<_TodoScheduleDraft>(
+      context: context,
+      builder: (context) => _TodoScheduleDialog(
+        title: '编辑任务时间',
+        initialDueAt: _draftDueAt,
+        initialRecurrence: _draftRecurrence,
+      ),
+    );
+    if (result == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _draftDueAt = result.dueAt;
+      _draftRecurrence = result.recurrence;
+    });
+  }
+
+  void _submit() {
+    Navigator.of(context).pop(
+      _TodoEditorResult(
+        title: _controller.text.trim(),
+        dueAt: _draftDueAt,
+        recurrence: _draftRecurrence,
       ),
     );
   }
