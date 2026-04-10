@@ -81,10 +81,13 @@ Future<void> _configureDesktopWindow(LightDoWindowRole role) async {
     return;
   }
 
+  final floatingBallWindowSize = Platform.isWindows
+      ? const Size(76, 78)
+      : const Size(76, 76);
   final options = role == LightDoWindowRole.floatingBall
       ? WindowOptions(
-          size: const Size(76, 76),
-          minimumSize: const Size(76, 76),
+          size: floatingBallWindowSize,
+          minimumSize: floatingBallWindowSize,
           center: false,
           title: 'LightDo',
           backgroundColor: Colors.transparent,
@@ -109,14 +112,16 @@ Future<void> _configureDesktopWindow(LightDoWindowRole role) async {
 }
 
 void _configureBitsdojoWindow(LightDoWindowRole role) {
-  if (!Platform.isMacOS) {
+  if (!(Platform.isMacOS || Platform.isWindows)) {
     return;
   }
 
   doWhenWindowReady(() {
     final win = appWindow;
     if (role == LightDoWindowRole.floatingBall) {
-      const ballSize = Size(76, 76);
+      final ballSize = Platform.isWindows
+          ? const Size(76, 78)
+          : const Size(76, 76);
       win.minSize = ballSize;
       win.maxSize = ballSize;
       win.size = ballSize;
@@ -124,8 +129,10 @@ void _configureBitsdojoWindow(LightDoWindowRole role) {
       return;
     }
 
-    const editorMinSize = Size(360, 600);
-    win.minSize = editorMinSize;
+    if (Platform.isMacOS) {
+      const editorMinSize = Size(360, 600);
+      win.minSize = editorMinSize;
+    }
   });
 }
 
