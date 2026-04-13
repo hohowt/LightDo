@@ -46,7 +46,9 @@ class FloatingBallHome extends StatefulWidget {
 
 class _FloatingBallHomeState extends State<FloatingBallHome>
     with WindowListener {
-  static const Size _ballWindowSize = Size(76, 76);
+  static final Size _ballWindowSize = Platform.isWindows
+      ? const Size(76, 78)
+      : const Size(76, 76);
   static const double _launchTopPadding = 28;
   static const double _launchRightPadding = 24;
 
@@ -368,6 +370,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
         await Future<void>.delayed(const Duration(milliseconds: 120));
       }
     }
+    // Controller is stale — reset so next tap spawns a fresh window.
+    _editorWindowController = null;
     if (lastError != null) {
       throw lastError;
     }

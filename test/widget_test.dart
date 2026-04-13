@@ -6,8 +6,12 @@ import 'package:lightdo/models/app_snapshot.dart';
 import 'package:lightdo/services/desktop_integration.dart';
 import 'package:lightdo/models/todo_item.dart';
 import 'package:lightdo/services/lightdo_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
   testWidgets('renders existing todo item', (tester) async {
     final snapshot = AppSnapshot(
       todos: [TodoItem.create(title: '整理 Flutter 需求')],
