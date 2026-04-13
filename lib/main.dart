@@ -12,7 +12,11 @@ import 'models/app_settings.dart';
 import 'models/app_snapshot.dart';
 import 'models/todo_item.dart';
 import 'services/desktop_integration.dart';
+import 'services/device_id.dart';
 import 'services/lightdo_storage.dart';
+import 'services/sync_service.dart';
+import 'widgets/qr_scanner_page.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 Future<void> main([List<String> args = const []]) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -195,44 +199,68 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   String? _errorMessage;
   Timer? _saveTimer;
   bool _desktopInitialized = false;
+  late SyncService _syncService = SyncService(nodeId: 'test');
+  StreamSubscription<List<TodoItem>>? _syncSub;
 
   @override
   void initState() {
     super.initState();
-    _loadSnapshot();
+    unawaited(_initAll());
   }
 
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _syncSub?.cancel();
+    _syncService.dispose();
     _inputController.dispose();
     unawaited(widget.desktopIntegration.dispose());
     super.dispose();
   }
 
-  Future<void> _loadSnapshot() async {
+  Future<void> _initAll() async {
+    // 1. 初始化 SyncService
+    final nodeId = await DeviceIdService().getOrCreate();
+    _syncService = SyncService(nodeId: nodeId);
+
+    // 2. 加载本地快照
+    AppSnapshot snapshot;
     try {
-      final snapshot = await widget.storage.load();
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _todos = snapshot.todos;
-        _settings = snapshot.settings.copyWith(expandCompletedByDefault: false);
-        _isLoading = false;
-      });
-      unawaited(_initializeDesktopIntegration());
+      snapshot = await widget.storage.load();
     } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isLoading = false;
-        _settings = _settings.copyWith(expandCompletedByDefault: false);
-        _errorMessage = '本地数据读取失败，已回退为空列表。';
-      });
-      unawaited(_initializeDesktopIntegration());
+      snapshot = AppSnapshot.empty();
     }
+
+    // 3. 加载 CRDT 状态，若为空则用现有 todos 初始化
+    if (widget.storage is FileLightDoStorage) {
+      final records =
+          await (widget.storage as FileLightDoStorage).loadCrdtRecords();
+      if (records.isEmpty) {
+        _syncService.initEmpty();
+        for (final todo in snapshot.todos) {
+          _syncService.recordMutation(todo);
+        }
+      } else {
+        _syncService.initFromRecords(records);
+      }
+    } else {
+      _syncService.initEmpty();
+    }
+
+    // 4. 监听同步更新（所有平台）
+    _syncSub = _syncService.todosStream.listen((mergedTodos) {
+      if (!mounted) return;
+      setState(() => _todos = mergedTodos);
+      _scheduleSave();
+    });
+
+    if (!mounted) return;
+    setState(() {
+      _todos = snapshot.todos;
+      _settings = snapshot.settings.copyWith(expandCompletedByDefault: false);
+      _isLoading = false;
+    });
+    unawaited(_initializeDesktopIntegration());
   }
 
   Future<void> _initializeDesktopIntegration() async {
@@ -261,6 +289,10 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
         await widget.storage.save(
           AppSnapshot(todos: _todos, settings: _settings),
         );
+        if (widget.storage is FileLightDoStorage) {
+          await (widget.storage as FileLightDoStorage)
+              .saveCrdtRecords(_syncService.exportRecords());
+        }
         if (!mounted || _errorMessage == null) {
           return;
         }
@@ -285,9 +317,12 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     }
     final nextTodo = TodoItem.create(
       title: text,
+      nodeId: _syncService.nodeId,
       dueAt: _composerDueAt,
       recurrence: _composerRecurrence,
     );
+    _syncService.recordMutation(nextTodo);
+    _syncService.notifyPeers();
     setState(() {
       _todos = [nextTodo, ..._todos];
       _inputController.clear();
@@ -305,9 +340,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
         break;
       }
     }
-    if (targetTodo == null) {
-      return;
-    }
+    if (targetTodo == null) return;
 
     final nextRecurringTodo = selected && !targetTodo.isCompleted
         ? targetTodo.createNextRecurringInstance()
@@ -315,16 +348,20 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
 
     setState(() {
       final updatedTodos = _todos
-          .map(
-            (todo) =>
-                todo.id == id ? todo.copyWith(isCompleted: selected) : todo,
-          )
+          .map((todo) =>
+              todo.id == id ? todo.copyWith(isCompleted: selected) : todo)
           .toList(growable: true);
 
       if (nextRecurringTodo != null &&
           !_containsRecurringInstance(updatedTodos, nextRecurringTodo)) {
         updatedTodos.insert(0, nextRecurringTodo);
+        _syncService.recordMutation(nextRecurringTodo);
       }
+
+      for (final t in updatedTodos) {
+        if (t.id == id) _syncService.recordMutation(t);
+      }
+      _syncService.notifyPeers();
 
       _todos = updatedTodos;
     });
@@ -367,6 +404,9 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
           )
           .toList(growable: false);
     });
+    final updated = _todos.firstWhere((t) => t.id == todo.id);
+    _syncService.recordMutation(updated);
+    _syncService.notifyPeers();
     _scheduleSave();
   }
 
@@ -396,8 +436,12 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   }
 
   void _deleteTodo(String id) {
+    _syncService.recordDeletion(id);
+    _syncService.notifyPeers();
     setState(() {
-      _todos = _todos.where((todo) => todo.id != id).toList(growable: false);
+      _todos = _todos
+          .map((t) => t.id == id ? t.copyWith(isDeleted: true) : t)
+          .toList(growable: false);
     });
     _scheduleSave();
   }
@@ -425,14 +469,18 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
             },
           ) ??
           false;
-      if (!shouldClear) {
-        return;
-      }
+      if (!shouldClear) return;
     }
 
+    final completedIds =
+        _todos.where((t) => t.isCompleted).map((t) => t.id).toList();
+    for (final id in completedIds) {
+      _syncService.recordDeletion(id);
+    }
+    _syncService.notifyPeers();
     setState(() {
       _todos = _todos
-          .where((todo) => !todo.isCompleted)
+          .map((t) => t.isCompleted ? t.copyWith(isDeleted: true) : t)
           .toList(growable: false);
     });
     _scheduleSave();
@@ -476,11 +524,13 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     }
   }
 
-  List<TodoItem> get _activeTodos =>
-      _todos.where((todo) => !todo.isCompleted).toList(growable: false);
+  List<TodoItem> get _activeTodos => _todos
+      .where((todo) => !todo.isCompleted && !todo.isDeleted)
+      .toList(growable: false);
 
-  List<TodoItem> get _completedTodos =>
-      _todos.where((todo) => todo.isCompleted).toList(growable: false);
+  List<TodoItem> get _completedTodos => _todos
+      .where((todo) => todo.isCompleted && !todo.isDeleted)
+      .toList(growable: false);
 
   bool _containsRecurringInstance(List<TodoItem> todos, TodoItem candidate) {
     return todos.any((todo) {
@@ -623,12 +673,25 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   Future<void> _openSettingsSheet(BuildContext context) async {
     final nextSettings = await showDialog<AppSettings>(
       context: context,
-      builder: (context) => _SettingsDialog(settings: _settings),
+      builder: (context) =>
+          _SettingsDialog(settings: _settings, syncService: _syncService),
     );
-    if (nextSettings == null) {
-      return;
-    }
+    if (nextSettings == null) return;
     _updateSettings(nextSettings);
+
+    // Android: open scanner if sync just enabled
+    if (nextSettings.syncEnabled &&
+        !_settings.syncEnabled &&
+        Platform.isAndroid) {
+      if (!mounted) return;
+      final ctx = context;
+      // ignore: use_build_context_synchronously
+      await Navigator.of(ctx).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => QrScannerPage(syncService: _syncService),
+        ),
+      );
+    }
   }
 }
 
@@ -1533,9 +1596,10 @@ class _TodoEditorDialogState extends State<_TodoEditorDialog> {
 }
 
 class _SettingsDialog extends StatefulWidget {
-  const _SettingsDialog({required this.settings});
+  const _SettingsDialog({required this.settings, required this.syncService});
 
   final AppSettings settings;
+  final SyncService syncService;
 
   @override
   State<_SettingsDialog> createState() => _SettingsDialogState();
@@ -1543,17 +1607,46 @@ class _SettingsDialog extends StatefulWidget {
 
 class _SettingsDialogState extends State<_SettingsDialog> {
   late AppSettings _draft = widget.settings;
+  SyncServerInfo? _serverInfo;
+  bool _isStartingServer = false;
 
   bool get _showDesktopSection => Platform.isWindows || Platform.isMacOS;
+  bool get _showQr =>
+      _draft.syncEnabled &&
+      (_showDesktopSection || Platform.isLinux) &&
+      (_serverInfo != null || _isStartingServer);
+
+  @override
+  void initState() {
+    super.initState();
+    if (_draft.syncEnabled) {
+      _serverInfo = widget.syncService.serverInfo;
+      if (_serverInfo == null) unawaited(_startServer());
+    }
+  }
+
+  Future<void> _startServer() async {
+    setState(() => _isStartingServer = true);
+    try {
+      final info = await widget.syncService.startServer();
+      if (mounted) setState(() { _serverInfo = info; });
+    } finally {
+      if (mounted) setState(() => _isStartingServer = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final qrData = _serverInfo == null
+        ? null
+        : 'ws://${_serverInfo!.ip}:${_serverInfo!.port}/sync?token=${_serverInfo!.token}';
+
     return AlertDialog(
       title: const Text('设置'),
       content: SizedBox(
         width: 420,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 340),
+          constraints: BoxConstraints(maxHeight: _showQr ? 600 : 340),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1603,6 +1696,91 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                           _draft = _draft.copyWith(launchAtStartup: value);
                         });
                       },
+                    ),
+                ],
+                const Divider(),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _draft.syncEnabled,
+                  title: const Text('局域网同步'),
+                  subtitle: const Text('通过局域网与其他设备双向同步待办。'),
+                  onChanged: (value) {
+                    setState(() {
+                      _draft = _draft.copyWith(syncEnabled: value);
+                    });
+                    if (value) {
+                      unawaited(_startServer());
+                    } else {
+                      unawaited(widget.syncService.stopServer());
+                      setState(() { _serverInfo = null; });
+                    }
+                  },
+                ),
+                if (_draft.syncEnabled && Platform.isAndroid) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        await Navigator.of(context).push<bool>(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                QrScannerPage(syncService: widget.syncService),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.qr_code_scanner_rounded),
+                      label: const Text('扫描同步码'),
+                    ),
+                  ),
+                  if (widget.syncService.isClientConnected)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '已连接到电脑',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF2E6C60),
+                        ),
+                      ),
+                    ),
+                ],
+                if (_showQr) ...[
+                  const SizedBox(height: 8),
+                  if (_isStartingServer)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: CircularProgressIndicator(),
+                    )
+                  else
+                    Column(
+                      children: [
+                        QrImageView(data: qrData!, size: 200),
+                        const SizedBox(height: 8),
+                        Text(
+                          '用 Android 端扫描二维码完成同步',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 4),
+                        StreamBuilder<int>(
+                          stream: Stream.periodic(
+                            const Duration(seconds: 2),
+                            (_) => widget.syncService.connectedClientCount,
+                          ),
+                          initialData: widget.syncService.connectedClientCount,
+                          builder: (context, snap) {
+                            final count = snap.data ?? 0;
+                            return Text(
+                              count == 0 ? '等待设备连接…' : '已连接 $count 台设备',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: count == 0
+                                    ? const Color(0xFF9E9E9E)
+                                    : const Color(0xFF2E6C60),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ),
                 ],
               ],

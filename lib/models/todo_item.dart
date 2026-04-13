@@ -53,15 +53,19 @@ class TodoItem {
     required this.dueAt,
     required this.recurrence,
     required this.seriesId,
+    this.isDeleted = false,
   });
 
   factory TodoItem.create({
     required String title,
+    String nodeId = '',
     DateTime? dueAt,
     TodoRecurrence recurrence = TodoRecurrence.none,
   }) {
     final now = DateTime.now();
-    final id = now.microsecondsSinceEpoch.toString();
+    final id = nodeId.isEmpty
+        ? now.microsecondsSinceEpoch.toString()
+        : '${nodeId}_${now.microsecondsSinceEpoch}';
     final normalizedRecurrence = dueAt == null
         ? TodoRecurrence.none
         : recurrence;
@@ -95,6 +99,7 @@ class TodoItem {
       dueAt: dueAt,
       recurrence: recurrence,
       seriesId: json['seriesId'] as String?,
+      isDeleted: json['isDeleted'] as bool? ?? false,
     );
   }
 
@@ -108,6 +113,7 @@ class TodoItem {
   final DateTime? dueAt;
   final TodoRecurrence recurrence;
   final String? seriesId;
+  final bool isDeleted;
 
   bool get isRecurring => recurrence != TodoRecurrence.none && dueAt != null;
 
@@ -146,6 +152,7 @@ class TodoItem {
     TodoRecurrence? recurrence,
     String? seriesId,
     DateTime? updatedAt,
+    bool? isDeleted,
   }) {
     final nextDueAt = identical(dueAt, _noChange)
         ? this.dueAt
@@ -164,6 +171,7 @@ class TodoItem {
       seriesId: nextRecurrence == TodoRecurrence.none
           ? null
           : (seriesId ?? this.seriesId ?? id),
+      isDeleted: isDeleted ?? this.isDeleted,
     );
   }
 
@@ -209,6 +217,7 @@ class TodoItem {
       'dueAt': dueAt?.toIso8601String(),
       'recurrence': recurrence.storageValue,
       'seriesId': seriesId,
+      'isDeleted': isDeleted,
     };
   }
 

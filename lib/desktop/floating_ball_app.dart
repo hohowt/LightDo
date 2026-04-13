@@ -370,6 +370,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
         await Future<void>.delayed(const Duration(milliseconds: 120));
       }
     }
+    // Controller is stale — reset so next tap spawns a fresh window.
+    _editorWindowController = null;
     if (lastError != null) {
       throw lastError;
     }
