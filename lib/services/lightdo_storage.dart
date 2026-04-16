@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path_provider/path_provider.dart';
+
 import '../models/app_settings.dart';
 import '../models/app_snapshot.dart';
 import '../models/todo_item.dart';
@@ -51,6 +53,22 @@ class FileLightDoStorage extends LightDoStorage {
     );
   }
 
+  Future<Map<String, dynamic>> loadCrdtRecords() async {
+    final dir = await _resolveDataDirectory();
+    final file = File('${dir.path}${Platform.pathSeparator}crdt_state.json');
+    if (!await file.exists()) return {};
+    final raw = await file.readAsString();
+    if (raw.trim().isEmpty) return {};
+    return jsonDecode(raw) as Map<String, dynamic>;
+  }
+
+  Future<void> saveCrdtRecords(Map<String, dynamic> records) async {
+    final dir = await _resolveDataDirectory();
+    await dir.create(recursive: true);
+    final file = File('${dir.path}${Platform.pathSeparator}crdt_state.json');
+    await file.writeAsString(jsonEncode(records));
+  }
+
   Future<File> _resolveFile() async {
     final directory = await _resolveDataDirectory();
     return File('${directory.path}${Platform.pathSeparator}lightdo.json');
@@ -62,9 +80,7 @@ class FileLightDoStorage extends LightDoStorage {
       if (home == null || home.isEmpty) {
         throw StateError('无法定位 HOME 目录');
       }
-      return Directory(
-        '$home/Library/Application Support/LightDo',
-      );
+      return Directory('$home/Library/Application Support/LightDo');
     }
 
     if (Platform.isWindows) {
@@ -74,6 +90,11 @@ class FileLightDoStorage extends LightDoStorage {
         throw StateError('无法定位 APPDATA 目录');
       }
       return Directory('$base\\LightDo');
+    }
+
+    if (Platform.isAndroid) {
+      final dir = await getApplicationSupportDirectory();
+      return dir;
     }
 
     final home = Platform.environment['HOME'];

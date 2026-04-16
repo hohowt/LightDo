@@ -7,6 +7,7 @@ class AppSettings {
     required this.minimizeToTrayOnClose,
     required this.launchAtStartup,
     required this.enableGlobalHotkey,
+    this.syncEnabled = false,
   });
 
   factory AppSettings.defaults() {
@@ -18,6 +19,7 @@ class AppSettings {
       minimizeToTrayOnClose: true,
       launchAtStartup: false,
       enableGlobalHotkey: true,
+      syncEnabled: false,
     );
   }
 
@@ -35,6 +37,7 @@ class AppSettings {
       minimizeToTrayOnClose: json['minimizeToTrayOnClose'] as bool? ?? true,
       launchAtStartup: json['launchAtStartup'] as bool? ?? false,
       enableGlobalHotkey: json['enableGlobalHotkey'] as bool? ?? true,
+      syncEnabled: json['syncEnabled'] as bool? ?? false,
     );
   }
 
@@ -45,6 +48,7 @@ class AppSettings {
   final bool minimizeToTrayOnClose;
   final bool launchAtStartup;
   final bool enableGlobalHotkey;
+  final bool syncEnabled;
 
   AppSettings copyWith({
     bool? expandCompletedByDefault,
@@ -54,6 +58,7 @@ class AppSettings {
     bool? minimizeToTrayOnClose,
     bool? launchAtStartup,
     bool? enableGlobalHotkey,
+    bool? syncEnabled,
   }) {
     return AppSettings(
       expandCompletedByDefault:
@@ -66,6 +71,7 @@ class AppSettings {
           minimizeToTrayOnClose ?? this.minimizeToTrayOnClose,
       launchAtStartup: launchAtStartup ?? this.launchAtStartup,
       enableGlobalHotkey: enableGlobalHotkey ?? this.enableGlobalHotkey,
+      syncEnabled: syncEnabled ?? this.syncEnabled,
     );
   }
 
@@ -78,6 +84,7 @@ class AppSettings {
       'minimizeToTrayOnClose': minimizeToTrayOnClose,
       'launchAtStartup': launchAtStartup,
       'enableGlobalHotkey': enableGlobalHotkey,
+      'syncEnabled': syncEnabled,
     };
   }
 }

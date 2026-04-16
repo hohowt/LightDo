@@ -50,7 +50,7 @@ void main() {
       TodoDeadlineState.normal,
     );
     expect(
-      todo.deadlineStateAt(DateTime(2026, 4, 10, 9, 0)),
+      todo.deadlineStateAt(DateTime(2026, 4, 10, 17, 45)),
       TodoDeadlineState.dueSoon,
     );
     expect(
