@@ -1288,7 +1288,7 @@ class _TodoScheduleDialog extends StatefulWidget {
 }
 
 class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
-  final GlobalKey<FormState> _dateFormKey = GlobalKey<FormState>();
+  final GlobalKey<FormState> _datePickerFormKey = GlobalKey<FormState>();
   late DateTime _draftDate = widget.initialDueAt ?? _defaultDueAt();
   late int _draftHour = (widget.initialDueAt ?? _draftDate).hour;
   late int _draftMinute = (widget.initialDueAt ?? _draftDate).minute;
@@ -1334,7 +1334,7 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
               if (_scheduleEnabled) ...[
                 const SizedBox(height: 8),
                 Form(
-                  key: _dateFormKey,
+                  key: _datePickerFormKey,
                   child: InputDatePickerFormField(
                     initialDate: _draftDate,
                     firstDate: DateTime(DateTime.now().year - 1),
@@ -1450,7 +1450,7 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
         FilledButton(
           onPressed: () {
             if (_scheduleEnabled) {
-              final formState = _dateFormKey.currentState;
+              final formState = _datePickerFormKey.currentState;
               if (formState != null) {
                 if (!formState.validate()) {
                   return;
