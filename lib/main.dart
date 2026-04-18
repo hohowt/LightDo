@@ -160,6 +160,7 @@ class LightDoApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
+        fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF1D6F5F),
           brightness: Brightness.light,
@@ -1287,6 +1288,7 @@ class _TodoScheduleDialog extends StatefulWidget {
 }
 
 class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
+  final GlobalKey<FormState> _dateFormKey = GlobalKey<FormState>();
   late DateTime _draftDate = widget.initialDueAt ?? _defaultDueAt();
   late int _draftHour = (widget.initialDueAt ?? _draftDate).hour;
   late int _draftMinute = (widget.initialDueAt ?? _draftDate).minute;
@@ -1331,16 +1333,19 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
               ),
               if (_scheduleEnabled) ...[
                 const SizedBox(height: 8),
-                InputDatePickerFormField(
-                  initialDate: _draftDate,
-                  firstDate: DateTime(DateTime.now().year - 1),
-                  lastDate: DateTime(DateTime.now().year + 5),
-                  fieldLabelText: '截止日期',
-                  fieldHintText: 'yyyy/mm/dd',
-                  onDateSubmitted: _updateDraftDate,
-                  onDateSaved: _updateDraftDate,
-                  errorFormatText: '日期格式不正确',
-                  errorInvalidText: '日期不在允许范围内',
+                Form(
+                  key: _dateFormKey,
+                  child: InputDatePickerFormField(
+                    initialDate: _draftDate,
+                    firstDate: DateTime(DateTime.now().year - 1),
+                    lastDate: DateTime(DateTime.now().year + 5),
+                    fieldLabelText: '截止日期',
+                    fieldHintText: 'yyyy/mm/dd',
+                    onDateSubmitted: _updateDraftDate,
+                    onDateSaved: _updateDraftDate,
+                    errorFormatText: '日期格式不正确',
+                    errorInvalidText: '日期不在允许范围内',
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -1443,14 +1448,25 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
           child: const Text('取消'),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(
-            _TodoScheduleDraft(
-              dueAt: _scheduleEnabled ? _composeDraftDueAt() : null,
-              recurrence: !_scheduleEnabled
-                  ? TodoRecurrence.none
-                  : _draftRecurrence,
-            ),
-          ),
+          onPressed: () {
+            if (_scheduleEnabled) {
+              final formState = _dateFormKey.currentState;
+              if (formState != null) {
+                if (!formState.validate()) {
+                  return;
+                }
+                formState.save();
+              }
+            }
+            Navigator.of(context).pop(
+              _TodoScheduleDraft(
+                dueAt: _scheduleEnabled ? _composeDraftDueAt() : null,
+                recurrence: !_scheduleEnabled
+                    ? TodoRecurrence.none
+                    : _draftRecurrence,
+              ),
+            );
+          },
           child: const Text('保存'),
         ),
       ],

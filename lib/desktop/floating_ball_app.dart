@@ -23,6 +23,7 @@ class FloatingBallApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
+        fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
         scaffoldBackgroundColor: Colors.transparent,
         canvasColor: Colors.transparent,
         splashColor: Colors.transparent,
