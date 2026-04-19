@@ -1338,22 +1338,28 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
               ),
               if (_scheduleEnabled) ...[
                 const SizedBox(height: 8),
-                InkWell(
-                  onTap: _pickDraftDate,
-                  borderRadius: BorderRadius.circular(12),
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: '截止日期',
-                      border: OutlineInputBorder(),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.calendar_month_rounded, size: 18),
-                        const SizedBox(width: 8),
-                        Text(
-                          _formatDateOnly(_draftDate),
-                        ),
-                      ],
+                Semantics(
+                  button: true,
+                  label: '截止日期选择器',
+                  hint: '点击打开日历选择截止日期',
+                  value: _formatDateOnly(_draftDate),
+                  child: InkWell(
+                    onTap: _pickDraftDate,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: '截止日期',
+                        border: OutlineInputBorder(),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_month_rounded, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            _formatDateOnly(_draftDate),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
