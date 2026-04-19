@@ -189,6 +189,8 @@ class LightDoHomePage extends StatefulWidget {
   State<LightDoHomePage> createState() => _LightDoHomePageState();
 }
 
+enum _ActiveTodoOrderGroup { upcoming, noDeadline, overdue }
+
 class _LightDoHomePageState extends State<LightDoHomePage> {
   final TextEditingController _inputController = TextEditingController();
 
@@ -531,16 +533,18 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
       return byGroup;
     }
 
-    if (aGroup == 0) {
-      final aDue = a.dueAt!;
-      final bDue = b.dueAt!;
+    final aDue = a.dueAt;
+    final bDue = b.dueAt;
+    if (aGroup == _ActiveTodoOrderGroup.upcoming &&
+        aDue != null &&
+        bDue != null) {
       final byDue = aDue.compareTo(bDue);
       if (byDue != 0) {
         return byDue;
       }
-    } else if (aGroup == 2) {
-      final aDue = a.dueAt!;
-      final bDue = b.dueAt!;
+    } else if (aGroup == _ActiveTodoOrderGroup.overdue &&
+        aDue != null &&
+        bDue != null) {
       final byDue = bDue.compareTo(aDue);
       if (byDue != 0) {
         return byDue;
@@ -554,15 +558,15 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     return a.id.compareTo(b.id);
   }
 
-  int _activeTodoOrderGroup(TodoItem todo, DateTime now) {
+  _ActiveTodoOrderGroup _activeTodoOrderGroup(TodoItem todo, DateTime now) {
     final dueAt = todo.dueAt;
     if (dueAt == null) {
-      return 1;
+      return _ActiveTodoOrderGroup.noDeadline;
     }
     if (dueAt.isBefore(now)) {
-      return 2;
+      return _ActiveTodoOrderGroup.overdue;
     }
-    return 0;
+    return _ActiveTodoOrderGroup.upcoming;
   }
 
   bool _containsRecurringInstance(List<TodoItem> todos, TodoItem candidate) {

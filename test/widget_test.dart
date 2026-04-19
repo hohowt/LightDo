@@ -166,4 +166,23 @@ void main() {
     expect(find.text('已过期'), findsOneWidget);
     expect(find.textContaining('更新于'), findsNWidgets(3));
   });
+
+  testWidgets('does not show date text for todo without deadline', (tester) async {
+    await tester.pumpWidget(
+      LightDoApp(
+        storage: MemoryLightDoStorage(
+          AppSnapshot(
+            todos: [TodoItem.create(title: '只写标题')],
+            settings: AppSettings.defaults(),
+          ),
+        ),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('只写标题'), findsOneWidget);
+    expect(find.textContaining('更新于'), findsNothing);
+    expect(find.textContaining('截止'), findsNothing);
+  });
 }
