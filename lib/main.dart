@@ -1163,7 +1163,6 @@ class _TodoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final summary = todo.summary;
     final deadlineState = todo.deadlineStateAt(now);
     final deadlineBadge = todo.deadlineBadgeLabelAt(now);
     final visualState = todo.isCompleted
@@ -1565,12 +1564,6 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     );
   }
 
-  static String _formatDate(DateTime value) {
-    final y = value.year.toString().padLeft(4, '0');
-    final m = value.month.toString().padLeft(2, '0');
-    final d = value.day.toString().padLeft(2, '0');
-    return '$y-$m-$d';
-  }
 }
 
 class _TodoEditorDialog extends StatefulWidget {
