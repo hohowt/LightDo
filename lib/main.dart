@@ -529,10 +529,14 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     }
   }
 
-  List<TodoItem> get _activeTodos => _todos
-      .where((todo) => !todo.isCompleted && !todo.isDeleted)
-      .toList(growable: false)
-    ..sort(_compareActiveTodoByDuePriority);
+  List<TodoItem> get _activeTodos {
+    final now = DateTime.now();
+    final active = _todos
+        .where((todo) => !todo.isCompleted && !todo.isDeleted)
+        .toList(growable: false);
+    active.sort((a, b) => _compareActiveTodoByDuePriority(a, b, now));
+    return active;
+  }
 
   List<TodoItem> get _completedTodos => _todos
       .where((todo) => todo.isCompleted && !todo.isDeleted)
@@ -550,8 +554,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     });
   }
 
-  int _compareActiveTodoByDuePriority(TodoItem a, TodoItem b) {
-    final now = DateTime.now();
+  int _compareActiveTodoByDuePriority(TodoItem a, TodoItem b, DateTime now) {
     final aOverdue = a.dueAt != null && a.dueAt!.isBefore(now);
     final bOverdue = b.dueAt != null && b.dueAt!.isBefore(now);
 
@@ -1372,9 +1375,7 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
                 OutlinedButton.icon(
                   onPressed: _pickDraftDate,
                   icon: const Icon(Icons.calendar_month_rounded),
-                  label: Text(
-                    '截止日期：${_draftDate.year.toString().padLeft(4, '0')}-${_draftDate.month.toString().padLeft(2, '0')}-${_draftDate.day.toString().padLeft(2, '0')}',
-                  ),
+                  label: Text('截止日期：${_formatDateOnly(_draftDate)}'),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -1529,6 +1530,13 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
       _draftHour,
       _draftMinute,
     );
+  }
+
+  String _formatDateOnly(DateTime value) {
+    final y = value.year.toString().padLeft(4, '0');
+    final m = value.month.toString().padLeft(2, '0');
+    final d = value.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
   }
 
   static DateTime _defaultDueAt() {
