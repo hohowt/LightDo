@@ -1294,6 +1294,7 @@ class _TodoScheduleDialog extends StatefulWidget {
 }
 
 class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
+  static const int _defaultDueHour = 12;
   late DateTime _draftDate = widget.initialDueAt ?? _defaultDueAt();
   late int _draftHour = (widget.initialDueAt ?? _draftDate).hour;
   late int _draftMinute = (widget.initialDueAt ?? _draftDate).minute;
@@ -1530,7 +1531,7 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
       now.year,
       now.month,
       now.day,
-      12,
+      _defaultDueHour,
       0,
     );
   }
