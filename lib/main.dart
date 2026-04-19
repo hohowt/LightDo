@@ -1343,6 +1343,7 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
                   button: true,
                   label: '截止日期选择器',
                   hint: '点击打开日历选择截止日期',
+                  onTapHint: '点击打开日历',
                   value: _formatSemanticDate(context, _draftDate),
                   child: InkWell(
                     onTap: _pickDraftDate,
