@@ -1163,7 +1163,6 @@ class _TodoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final summary = todo.summary;
     final deadlineState = todo.deadlineStateAt(now);
     final deadlineBadge = todo.deadlineBadgeLabelAt(now);
     final visualState = todo.isCompleted
@@ -1194,6 +1193,7 @@ class _TodoCard extends StatelessWidget {
       TodoDeadlineState.dueSoon => const Color(0xFF9B7626),
       TodoDeadlineState.normal => const Color(0xFF728781),
     };
+    final summary = todo.summary;
     final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
       fontWeight: FontWeight.w600,
       height: 1.25,
@@ -1253,10 +1253,10 @@ class _TodoCard extends StatelessWidget {
                     ],
                   ],
                 ),
-                if (todo.dueAt != null) ...[
+                if (summary.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
-                    todo.summary,
+                    summary,
                     style: Theme.of(
                       context,
                     ).textTheme.bodySmall?.copyWith(color: summaryColor),
@@ -1315,6 +1315,7 @@ class _TodoScheduleDialog extends StatefulWidget {
 
 class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
   static const int _defaultDueHour = 12;
+  static const int _defaultDueMinute = 0;
   late DateTime _draftDate = widget.initialDueAt ?? _defaultDueAt();
   late int _draftHour = (widget.initialDueAt ?? _draftDate).hour;
   late int _draftMinute = (widget.initialDueAt ?? _draftDate).minute;
@@ -1502,21 +1503,6 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     );
   }
 
-  Future<void> _pickDraftDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _draftDate,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 5),
-      helpText: '选择截止日期',
-    );
-    if (picked == null || !mounted) {
-      return;
-    }
-    _updateDraftDate(picked);
-  }
-
   void _updateDraftDate(DateTime value) {
     setState(() {
       _draftDate = DateTime(
@@ -1537,6 +1523,8 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 5),
       helpText: '选择截止日期',
+      cancelText: '取消',
+      confirmText: '确定',
     );
     if (selected == null || !mounted) {
       return;
@@ -1572,16 +1560,10 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
       now.month,
       now.day,
       _defaultDueHour,
-      0,
+      _defaultDueMinute,
     );
   }
 
-  static String _formatDate(DateTime value) {
-    final y = value.year.toString().padLeft(4, '0');
-    final m = value.month.toString().padLeft(2, '0');
-    final d = value.day.toString().padLeft(2, '0');
-    return '$y-$m-$d';
-  }
 }
 
 class _TodoEditorDialog extends StatefulWidget {
