@@ -124,45 +124,29 @@ void main() {
     expect(find.text('发送日报'), findsNothing);
   });
 
-  testWidgets('does not show date text for todo without due date', (
+  testWidgets('sorts active todos by due state and hides date for no-deadline', (
     tester,
   ) async {
-    final snapshot = AppSnapshot(
-      todos: [TodoItem.create(title: '仅标题任务')],
-      settings: AppSettings.defaults(),
-    );
-
-    await tester.pumpWidget(
-      LightDoApp(
-        storage: MemoryLightDoStorage(snapshot),
-        desktopIntegration: NoopDesktopIntegration(),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('仅标题任务'), findsOneWidget);
-    expect(find.textContaining('更新于'), findsNothing);
-    expect(find.textContaining('完成于'), findsNothing);
-    expect(find.textContaining('截止 '), findsNothing);
-  });
-
-  testWidgets('orders active todos by due priority', (tester) async {
     final now = DateTime.now();
-    final dueSoon = TodoItem.create(
-      title: '临近截止任务',
-      dueAt: now.add(const Duration(minutes: 10)),
+    final nearDue = TodoItem.create(
+      title: '最近截止',
+      dueAt: now.add(const Duration(hours: 1)),
     );
-    final noDue = TodoItem.create(title: '无截止任务');
+    final farDue = TodoItem.create(
+      title: '稍后截止',
+      dueAt: now.add(const Duration(hours: 3)),
+    );
+    final noDeadline = TodoItem.create(title: '无截止');
     final overdue = TodoItem.create(
       title: '已过期任务',
-      dueAt: now.subtract(const Duration(minutes: 10)),
+      dueAt: now.subtract(const Duration(hours: 1)),
     );
 
     await tester.pumpWidget(
       LightDoApp(
         storage: MemoryLightDoStorage(
           AppSnapshot(
-            todos: [noDue, overdue, dueSoon],
+            todos: [noDeadline, overdue, farDue, nearDue],
             settings: AppSettings.defaults(),
           ),
         ),
@@ -171,12 +155,34 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final dueSoonTop = tester.getTopLeft(find.text('临近截止任务')).dy;
-    final noDueTop = tester.getTopLeft(find.text('无截止任务')).dy;
-    final overdueTop = tester.getTopLeft(find.text('已过期任务')).dy;
+    final nearY = tester.getTopLeft(find.text('最近截止')).dy;
+    final farY = tester.getTopLeft(find.text('稍后截止')).dy;
+    final noDeadlineY = tester.getTopLeft(find.text('无截止')).dy;
+    final overdueY = tester.getTopLeft(find.text('已过期任务')).dy;
 
-    expect(dueSoonTop, lessThan(noDueTop));
-    expect(noDueTop, lessThan(overdueTop));
+    expect(nearY, lessThan(farY));
+    expect(farY, lessThan(noDeadlineY));
+    expect(noDeadlineY, lessThan(overdueY));
     expect(find.text('已过期'), findsOneWidget);
+    expect(find.textContaining('更新于'), findsNWidgets(3));
+  });
+
+  testWidgets('does not show date text for todo without deadline', (tester) async {
+    await tester.pumpWidget(
+      LightDoApp(
+        storage: MemoryLightDoStorage(
+          AppSnapshot(
+            todos: [TodoItem.create(title: '只写标题')],
+            settings: AppSettings.defaults(),
+          ),
+        ),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('只写标题'), findsOneWidget);
+    expect(find.textContaining('更新于'), findsNothing);
+    expect(find.textContaining('截止'), findsNothing);
   });
 }
