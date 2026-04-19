@@ -1518,7 +1518,10 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
   }
 
   String _formatDateOnly(DateTime value) {
-    return formatShortDateTime(value).split(' ').first;
+    final y = value.year.toString().padLeft(4, '0');
+    final m = value.month.toString().padLeft(2, '0');
+    final d = value.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
   }
 
   static DateTime _defaultDueAt() {
