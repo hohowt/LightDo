@@ -1512,11 +1512,11 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
   }
 
   static DateTime _defaultDueAt() {
-    final initial = DateTime.now();
+    final now = DateTime.now();
     return DateTime(
-      initial.year,
-      initial.month,
-      initial.day,
+      now.year,
+      now.month,
+      now.day,
       12,
       0,
     );
