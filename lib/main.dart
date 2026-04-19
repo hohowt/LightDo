@@ -204,6 +204,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   bool _desktopInitialized = false;
   late SyncService _syncService = SyncService(nodeId: 'test');
   StreamSubscription<List<TodoItem>>? _syncSub;
+  bool _hasManualActiveOrder = false;
 
   @override
   void initState() {
@@ -253,13 +254,17 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     // 4. 监听同步更新（所有平台）
     _syncSub = _syncService.todosStream.listen((mergedTodos) {
       if (!mounted) return;
-      setState(() => _todos = mergedTodos);
+      setState(() {
+        _todos = mergedTodos;
+        _hasManualActiveOrder = !_isActiveTodosInDefaultOrder(mergedTodos);
+      });
       _scheduleSave();
     });
 
     if (!mounted) return;
     setState(() {
       _todos = snapshot.todos;
+      _hasManualActiveOrder = !_isActiveTodosInDefaultOrder(snapshot.todos);
       _settings = snapshot.settings.copyWith(expandCompletedByDefault: false);
       _isLoading = false;
     });
@@ -517,7 +522,9 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     final active = _todos
         .where((todo) => !todo.isCompleted && !todo.isDeleted)
         .toList(growable: true);
-    active.sort((a, b) => _compareActiveTodoOrder(a, b, now));
+    if (!_hasManualActiveOrder) {
+      active.sort((a, b) => _compareActiveTodoOrder(a, b, now));
+    }
     return active;
   }
 
@@ -567,6 +574,56 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
       return _ActiveTodoOrderGroup.overdue;
     }
     return _ActiveTodoOrderGroup.upcoming;
+  }
+
+  bool _isActiveTodosInDefaultOrder(List<TodoItem> todos) {
+    final now = DateTime.now();
+    final active = todos
+        .where((todo) => !todo.isCompleted && !todo.isDeleted)
+        .toList(growable: false);
+    if (active.length < 2) {
+      return true;
+    }
+    final expected = [...active]
+      ..sort((a, b) => _compareActiveTodoOrder(a, b, now));
+    for (var i = 0; i < active.length; i++) {
+      if (active[i].id != expected[i].id) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _reorderActiveTodos(int oldIndex, int newIndex) {
+    final active = _activeTodos.toList(growable: true);
+    if (oldIndex < 0 || oldIndex >= active.length) {
+      return;
+    }
+    if (newIndex > oldIndex) {
+      newIndex -= 1;
+    }
+    if (newIndex < 0 || newIndex > active.length) {
+      return;
+    }
+
+    final moved = active.removeAt(oldIndex);
+    active.insert(newIndex, moved);
+
+    var activeCursor = 0;
+    final reorderedTodos = _todos.map((todo) {
+      if (todo.isCompleted || todo.isDeleted) {
+        return todo;
+      }
+      final next = active[activeCursor];
+      activeCursor += 1;
+      return next;
+    }).toList(growable: false);
+
+    setState(() {
+      _todos = reorderedTodos;
+      _hasManualActiveOrder = true;
+    });
+    _scheduleSave();
   }
 
   bool _containsRecurringInstance(List<TodoItem> todos, TodoItem candidate) {
@@ -641,30 +698,63 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                 : '${activeTodos.length} 项进行中',
                             child: Column(
                               children: [
-                                Expanded(
-                                  child: activeTodos.isEmpty
-                                      ? const _EmptyState()
-                                      : ListView.separated(
-                                          itemCount: activeTodos.length,
-                                          separatorBuilder: (_, _) =>
-                                              const SizedBox(height: 8),
-                                          itemBuilder: (context, index) {
-                                            final todo = activeTodos[index];
-                                            return _TodoCard(
-                                              key: ValueKey(todo.id),
-                                              todo: todo,
-                                              compact: _settings.compactMode,
-                                              onToggle: (selected) =>
-                                                  _toggleTodo(
-                                                    todo.id,
-                                                    selected,
-                                                  ),
-                                              onEdit: () => _editTodo(todo),
-                                              onDelete: () =>
-                                                  _deleteTodo(todo.id),
-                                            );
-                                          },
-                                        ),
+                                 Expanded(
+                                   child: activeTodos.isEmpty
+                                       ? const _EmptyState()
+                                       : ReorderableListView.builder(
+                                           padding: EdgeInsets.zero,
+                                           buildDefaultDragHandles: false,
+                                           itemCount: activeTodos.length,
+                                           onReorder: _reorderActiveTodos,
+                                           itemBuilder: (context, index) {
+                                             final todo = activeTodos[index];
+                                             return Padding(
+                                               key: ValueKey(todo.id),
+                                               padding: const EdgeInsets.only(
+                                                 bottom: 8,
+                                               ),
+                                               child: Row(
+                                                 crossAxisAlignment:
+                                                     CrossAxisAlignment.start,
+                                                 children: [
+                                                   ReorderableDragStartListener(
+                                                     index: index,
+                                                     child: const Padding(
+                                                       padding: EdgeInsets.only(
+                                                         top: 14,
+                                                         right: 6,
+                                                       ),
+                                                       child: Icon(
+                                                         Icons
+                                                             .drag_indicator_rounded,
+                                                         size: 18,
+                                                         color: Color(
+                                                           0xFF8B9893,
+                                                         ),
+                                                       ),
+                                                     ),
+                                                   ),
+                                                   Expanded(
+                                                     child: _TodoCard(
+                                                       todo: todo,
+                                                       compact:
+                                                           _settings.compactMode,
+                                                       onToggle: (selected) =>
+                                                           _toggleTodo(
+                                                             todo.id,
+                                                             selected,
+                                                           ),
+                                                       onEdit: () =>
+                                                           _editTodo(todo),
+                                                       onDelete: () =>
+                                                           _deleteTodo(todo.id),
+                                                     ),
+                                                   ),
+                                                 ],
+                                               ),
+                                             );
+                                           },
+                                         ),
                                 ),
                                 const SizedBox(height: 16),
                                 _CompletedPanel(

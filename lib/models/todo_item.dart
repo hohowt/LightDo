@@ -225,8 +225,6 @@ class TodoItem {
     final pieces = <String>[];
     if (dueAt != null) {
       pieces.add('截止 ${formatShortDateTime(dueAt!)}');
-      final action = isCompleted ? '完成于' : '更新于';
-      pieces.add('$action ${formatShortDateTime(updatedAt)}');
     }
     if (recurrence != TodoRecurrence.none) {
       pieces.add(recurrence.label);
