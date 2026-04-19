@@ -528,7 +528,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   int _compareActiveTodoOrder(TodoItem a, TodoItem b, DateTime now) {
     final aGroup = _activeTodoOrderGroup(a, now);
     final bGroup = _activeTodoOrderGroup(b, now);
-    final byGroup = aGroup.compareTo(bGroup);
+    final byGroup = aGroup.index.compareTo(bGroup.index);
     if (byGroup != 0) {
       return byGroup;
     }
@@ -1163,6 +1163,7 @@ class _TodoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
+    final summary = todo.summary;
     final deadlineState = todo.deadlineStateAt(now);
     final deadlineBadge = todo.deadlineBadgeLabelAt(now);
     final visualState = todo.isCompleted
@@ -1313,6 +1314,7 @@ class _TodoScheduleDialog extends StatefulWidget {
 }
 
 class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
+  static const int _defaultDueHour = 12;
   late DateTime _draftDate = widget.initialDueAt ?? _defaultDueAt();
   late int _draftHour = (widget.initialDueAt ?? _draftDate).hour;
   late int _draftMinute = (widget.initialDueAt ?? _draftDate).minute;
@@ -1357,12 +1359,30 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
               ),
               if (_scheduleEnabled) ...[
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _pickDraftDate,
-                  icon: const Icon(Icons.calendar_month_outlined),
-                  label: SizedBox(
-                    width: double.infinity,
-                    child: Text('截止日期 ${_formatDate(_draftDate)}'),
+                Semantics(
+                  button: true,
+                  label: '截止日期选择器',
+                  hint: '点击打开日历选择截止日期',
+                  onTapHint: '点击打开日历',
+                  value: _formatSemanticDate(context, _draftDate),
+                  child: InkWell(
+                    onTap: _pickDraftDate,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: '截止日期',
+                        border: OutlineInputBorder(),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_month_rounded, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            _formatDateOnly(_draftDate),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1509,6 +1529,21 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     });
   }
 
+  Future<void> _pickDraftDate() async {
+    final now = DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: _draftDate,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+      helpText: '选择截止日期',
+    );
+    if (selected == null || !mounted) {
+      return;
+    }
+    _updateDraftDate(selected);
+  }
+
   DateTime _composeDraftDueAt() {
     return DateTime(
       _draftDate.year,
@@ -1519,13 +1554,24 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     );
   }
 
+  String _formatDateOnly(DateTime value) {
+    final y = value.year.toString().padLeft(4, '0');
+    final m = value.month.toString().padLeft(2, '0');
+    final d = value.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+
+  String _formatSemanticDate(BuildContext context, DateTime value) {
+    return MaterialLocalizations.of(context).formatCompactDate(value);
+  }
+
   static DateTime _defaultDueAt() {
-    final initial = DateTime.now();
+    final now = DateTime.now();
     return DateTime(
-      initial.year,
-      initial.month,
-      initial.day,
-      12,
+      now.year,
+      now.month,
+      now.day,
+      _defaultDueHour,
       0,
     );
   }
