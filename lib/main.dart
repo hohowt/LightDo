@@ -569,7 +569,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
       return aRank.compareTo(bRank);
     }
 
-    if (aRank == _dueRankWithDeadline || aRank == _dueRankOverdue) {
+    if (aRank != _dueRankWithoutDeadline) {
       final dueCompare = a.dueAt!.compareTo(b.dueAt!);
       if (dueCompare != 0) {
         return dueCompare;
