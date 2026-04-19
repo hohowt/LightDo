@@ -11,6 +11,7 @@ import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'window_arguments.dart';
+import '../models/todo_item.dart';
 import '../services/lightdo_storage.dart';
 
 class FloatingBallApp extends StatelessWidget {
@@ -67,10 +68,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   bool _hotKeyEnabled = true;
   bool _launchAtStartupEnabled = false;
   bool _coveredByMain = false;
-  bool _flashPhase = false;
-  DateTime? _activeReminderUntil;
-  Timer? _reminderPollTimer;
-  Timer? _flashTimer;
+  bool _hasOverdueTodos = false;
+  Timer? _overduePollTimer;
 
   @override
   void initState() {
@@ -82,8 +81,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   void dispose() {
     windowManager.removeListener(this);
     unawaited(hotKeyManager.unregisterAll());
-    _reminderPollTimer?.cancel();
-    _flashTimer?.cancel();
+    _overduePollTimer?.cancel();
     if (_trayReady && Platform.isWindows) {
       unawaited(_systemTray.destroy());
     }
@@ -119,7 +117,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     windowManager.addListener(this);
     await _prepareFloatingBallWindow();
     await _loadSettings();
-    _startReminderMonitoring();
+    _startOverdueMonitoring();
     unawaited(_warmUpEditorWindow());
     if (Platform.isWindows) {
       await _setupTray();
@@ -177,65 +175,32 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     await _syncHotKey();
   }
 
-  void _startReminderMonitoring() {
-    _reminderPollTimer?.cancel();
-    _flashTimer?.cancel();
-    _reminderPollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      unawaited(_refreshReminderState());
+  void _startOverdueMonitoring() {
+    _overduePollTimer?.cancel();
+    _overduePollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      unawaited(_refreshOverdueState());
     });
-    _flashTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      final reminderActive = _isReminderActive;
-      if (!mounted) {
-        return;
-      }
-      if (!reminderActive) {
-        if (_flashPhase) {
-          setState(() {
-            _flashPhase = false;
-          });
-        }
-        return;
-      }
-      setState(() {
-        _flashPhase = !_flashPhase;
-      });
-    });
-    unawaited(_refreshReminderState());
+    unawaited(_refreshOverdueState());
   }
 
-  Future<void> _refreshReminderState() async {
+  Future<void> _refreshOverdueState() async {
     try {
       final snapshot = await _storage.load();
       final now = DateTime.now();
-      DateTime? reminderUntil;
-      for (final todo in snapshot.todos) {
-        if (!todo.shouldFlashReminderAt(now)) {
-          continue;
-        }
-        final endsAt = todo.reminderEndsAt();
-        if (endsAt == null) {
-          continue;
-        }
-        if (reminderUntil == null || endsAt.isAfter(reminderUntil)) {
-          reminderUntil = endsAt;
-        }
-      }
+      final hasOverdue = snapshot.todos.any(
+        (todo) =>
+            !todo.isDeleted &&
+            !todo.isCompleted &&
+            todo.deadlineStateAt(now) == TodoDeadlineState.overdue,
+      );
       if (!mounted) {
         return;
       }
-      final changed =
-          (reminderUntil == null && _activeReminderUntil != null) ||
-          (reminderUntil != null &&
-              (_activeReminderUntil == null ||
-                  !_activeReminderUntil!.isAtSameMomentAs(reminderUntil)));
-      if (!changed) {
+      if (_hasOverdueTodos == hasOverdue) {
         return;
       }
       setState(() {
-        _activeReminderUntil = reminderUntil;
-        if (reminderUntil == null) {
-          _flashPhase = false;
-        }
+        _hasOverdueTodos = hasOverdue;
       });
     } catch (_) {
       return;
@@ -428,14 +393,12 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
 
   @override
   Widget build(BuildContext context) {
-    final reminderActive = _isReminderActive;
     final gradientColors = _ballGradientColors(
-      reminderActive: reminderActive,
+      hasOverdueTodos: _hasOverdueTodos,
       coveredByMain: _coveredByMain,
-      flashPhase: _flashPhase,
     );
-    final borderColor = reminderActive && _flashPhase
-        ? const Color(0xFFFFF1C8)
+    final borderColor = _hasOverdueTodos
+        ? const Color(0xFFFFC2B8)
         : _coveredByMain
         ? const Color(0xFFF6E3A2)
         : Colors.white.withValues(alpha: 0.82);
@@ -480,17 +443,12 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     );
   }
 
-  bool get _isReminderActive =>
-      _activeReminderUntil != null &&
-      DateTime.now().isBefore(_activeReminderUntil!);
-
   List<Color> _ballGradientColors({
-    required bool reminderActive,
+    required bool hasOverdueTodos,
     required bool coveredByMain,
-    required bool flashPhase,
   }) {
-    if (reminderActive && flashPhase) {
-      return const [Color(0xFFE46048), Color(0xFFF6A85E)];
+    if (hasOverdueTodos) {
+      return const [Color(0xFFE46048), Color(0xFFCC3A3A)];
     }
     if (coveredByMain) {
       return const [Color(0xFFD4AF4F), Color(0xFF91B64F)];
