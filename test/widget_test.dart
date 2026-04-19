@@ -123,4 +123,60 @@ void main() {
     expect(find.text('整理桌面'), findsNothing);
     expect(find.text('发送日报'), findsNothing);
   });
+
+  testWidgets('does not show date text for todo without due date', (
+    tester,
+  ) async {
+    final snapshot = AppSnapshot(
+      todos: [TodoItem.create(title: '仅标题任务')],
+      settings: AppSettings.defaults(),
+    );
+
+    await tester.pumpWidget(
+      LightDoApp(
+        storage: MemoryLightDoStorage(snapshot),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('仅标题任务'), findsOneWidget);
+    expect(find.textContaining('更新于'), findsNothing);
+    expect(find.textContaining('完成于'), findsNothing);
+    expect(find.textContaining('截止 '), findsNothing);
+  });
+
+  testWidgets('orders active todos by due priority', (tester) async {
+    final now = DateTime.now();
+    final dueSoon = TodoItem.create(
+      title: '临近截止任务',
+      dueAt: now.add(const Duration(minutes: 10)),
+    );
+    final noDue = TodoItem.create(title: '无截止任务');
+    final overdue = TodoItem.create(
+      title: '已过期任务',
+      dueAt: now.subtract(const Duration(minutes: 10)),
+    );
+
+    await tester.pumpWidget(
+      LightDoApp(
+        storage: MemoryLightDoStorage(
+          AppSnapshot(
+            todos: [noDue, overdue, dueSoon],
+            settings: AppSettings.defaults(),
+          ),
+        ),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final dueSoonTop = tester.getTopLeft(find.text('临近截止任务')).dy;
+    final noDueTop = tester.getTopLeft(find.text('无截止任务')).dy;
+    final overdueTop = tester.getTopLeft(find.text('已过期任务')).dy;
+
+    expect(dueSoonTop, lessThan(noDueTop));
+    expect(noDueTop, lessThan(overdueTop));
+    expect(find.text('已过期'), findsOneWidget);
+  });
 }

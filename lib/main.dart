@@ -527,7 +527,8 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
 
   List<TodoItem> get _activeTodos => _todos
       .where((todo) => !todo.isCompleted && !todo.isDeleted)
-      .toList(growable: false);
+      .toList(growable: false)
+    ..sort(_compareActiveTodoByDuePriority);
 
   List<TodoItem> get _completedTodos => _todos
       .where((todo) => todo.isCompleted && !todo.isDeleted)
@@ -543,6 +544,30 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
           todo.dueAt!.isAtSameMomentAs(candidate.dueAt!);
       return sameSeries && sameDueAt;
     });
+  }
+
+  int _compareActiveTodoByDuePriority(TodoItem a, TodoItem b) {
+    final now = DateTime.now();
+    final aOverdue = a.dueAt != null && a.dueAt!.isBefore(now);
+    final bOverdue = b.dueAt != null && b.dueAt!.isBefore(now);
+
+    final aRank = aOverdue
+        ? 2
+        : (a.dueAt != null ? 0 : 1); // 0: 有截止日期, 1: 无截止日期, 2: 已过期
+    final bRank = bOverdue ? 2 : (b.dueAt != null ? 0 : 1);
+
+    if (aRank != bRank) {
+      return aRank.compareTo(bRank);
+    }
+
+    if (aRank == 0 || aRank == 2) {
+      final dueCompare = a.dueAt!.compareTo(b.dueAt!);
+      if (dueCompare != 0) {
+        return dueCompare;
+      }
+    }
+
+    return b.updatedAt.compareTo(a.updatedAt);
   }
 
   @override
@@ -1169,6 +1194,7 @@ class _TodoCard extends StatelessWidget {
       TodoDeadlineState.dueSoon => const Color(0xFF9B7626),
       TodoDeadlineState.normal => const Color(0xFF728781),
     };
+    final summary = todo.summary;
     final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
       fontWeight: FontWeight.w600,
       height: 1.25,
@@ -1229,13 +1255,15 @@ class _TodoCard extends StatelessWidget {
                     ],
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  todo.summary,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: summaryColor),
-                ),
+                if (summary.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    summary,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: summaryColor),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1288,7 +1316,6 @@ class _TodoScheduleDialog extends StatefulWidget {
 }
 
 class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
-  final GlobalKey<FormState> _datePickerFormKey = GlobalKey<FormState>();
   late DateTime _draftDate = widget.initialDueAt ?? _defaultDueAt();
   late int _draftHour = (widget.initialDueAt ?? _draftDate).hour;
   late int _draftMinute = (widget.initialDueAt ?? _draftDate).minute;
@@ -1333,18 +1360,11 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
               ),
               if (_scheduleEnabled) ...[
                 const SizedBox(height: 8),
-                Form(
-                  key: _datePickerFormKey,
-                  child: InputDatePickerFormField(
-                    initialDate: _draftDate,
-                    firstDate: DateTime(DateTime.now().year - 1),
-                    lastDate: DateTime(DateTime.now().year + 5),
-                    fieldLabelText: '截止日期',
-                    fieldHintText: 'yyyy/mm/dd',
-                    onDateSubmitted: _updateDraftDate,
-                    onDateSaved: _updateDraftDate,
-                    errorFormatText: '日期格式不正确',
-                    errorInvalidText: '日期不在允许范围内',
+                OutlinedButton.icon(
+                  onPressed: _pickDraftDate,
+                  icon: const Icon(Icons.calendar_month_rounded),
+                  label: Text(
+                    '截止日期：${_draftDate.year.toString().padLeft(4, '0')}-${_draftDate.month.toString().padLeft(2, '0')}-${_draftDate.day.toString().padLeft(2, '0')}',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1449,15 +1469,6 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
         ),
         FilledButton(
           onPressed: () {
-            if (_scheduleEnabled) {
-              final formState = _datePickerFormKey.currentState;
-              if (formState != null) {
-                if (!formState.validate()) {
-                  return;
-                }
-                formState.save();
-              }
-            }
             Navigator.of(context).pop(
               _TodoScheduleDraft(
                 dueAt: _scheduleEnabled ? _composeDraftDueAt() : null,
@@ -1485,6 +1496,22 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     });
   }
 
+  Future<void> _pickDraftDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _draftDate,
+      firstDate: DateTime(DateTime.now().year - 1),
+      lastDate: DateTime(DateTime.now().year + 5),
+      helpText: '选择截止日期',
+      cancelText: '取消',
+      confirmText: '确定',
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+    _updateDraftDate(picked);
+  }
+
   DateTime _composeDraftDueAt() {
     return DateTime(
       _draftDate.year,
@@ -1496,13 +1523,13 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
   }
 
   static DateTime _defaultDueAt() {
-    final initial = DateTime.now().add(const Duration(hours: 1));
+    final initial = DateTime.now();
     return DateTime(
       initial.year,
       initial.month,
       initial.day,
-      initial.hour,
-      initial.minute,
+      12,
+      0,
     );
   }
 }

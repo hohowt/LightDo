@@ -229,10 +229,6 @@ class TodoItem {
     if (recurrence != TodoRecurrence.none) {
       pieces.add(recurrence.label);
     }
-
-    final date = isCompleted ? updatedAt : updatedAt;
-    final action = isCompleted ? '完成于' : '更新于';
-    pieces.add('$action ${formatShortDateTime(date)}');
     return pieces.join(' · ');
   }
 
