@@ -1343,7 +1343,7 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
                   button: true,
                   label: '截止日期选择器',
                   hint: '点击打开日历选择截止日期',
-                  value: _formatDateOnly(_draftDate),
+                  value: _formatSemanticDate(context, _draftDate),
                   child: InkWell(
                     onTap: _pickDraftDate,
                     borderRadius: BorderRadius.circular(12),
@@ -1523,6 +1523,10 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     final m = value.month.toString().padLeft(2, '0');
     final d = value.day.toString().padLeft(2, '0');
     return '$y-$m-$d';
+  }
+
+  String _formatSemanticDate(BuildContext context, DateTime value) {
+    return MaterialLocalizations.of(context).formatCompactDate(value);
   }
 
   static DateTime _defaultDueAt() {
