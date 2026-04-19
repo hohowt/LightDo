@@ -164,7 +164,7 @@ void main() {
     expect(farY, lessThan(noDeadlineY));
     expect(noDeadlineY, lessThan(overdueY));
     expect(find.text('已过期'), findsOneWidget);
-    expect(find.textContaining('更新于'), findsNWidgets(3));
+    expect(find.textContaining('更新于'), findsNothing);
   });
 
   testWidgets('does not show date text for todo without deadline', (tester) async {
@@ -184,5 +184,44 @@ void main() {
     expect(find.text('只写标题'), findsOneWidget);
     expect(find.textContaining('更新于'), findsNothing);
     expect(find.textContaining('截止'), findsNothing);
+  });
+
+  testWidgets('allows manually reordering active todos', (tester) async {
+    final now = DateTime.now();
+    final nearDue = TodoItem.create(
+      title: '优先任务',
+      dueAt: now.add(const Duration(hours: 1)),
+    );
+    final farDue = TodoItem.create(
+      title: '后续任务',
+      dueAt: now.add(const Duration(hours: 3)),
+    );
+
+    await tester.pumpWidget(
+      LightDoApp(
+        storage: MemoryLightDoStorage(
+          AppSnapshot(
+            todos: [farDue, nearDue],
+            settings: AppSettings.defaults(),
+          ),
+        ),
+        desktopIntegration: NoopDesktopIntegration(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final nearBefore = tester.getTopLeft(find.text('优先任务')).dy;
+    final farBefore = tester.getTopLeft(find.text('后续任务')).dy;
+    expect(nearBefore, lessThan(farBefore));
+
+    await tester.drag(
+      find.byIcon(Icons.drag_indicator_rounded).at(1),
+      const Offset(0, -180),
+    );
+    await tester.pumpAndSettle();
+
+    final nearAfter = tester.getTopLeft(find.text('优先任务')).dy;
+    final farAfter = tester.getTopLeft(find.text('后续任务')).dy;
+    expect(farAfter, lessThan(nearAfter));
   });
 }
