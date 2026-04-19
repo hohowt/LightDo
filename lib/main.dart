@@ -189,6 +189,8 @@ class LightDoHomePage extends StatefulWidget {
   State<LightDoHomePage> createState() => _LightDoHomePageState();
 }
 
+enum _ActiveTodoOrderGroup { upcoming, noDeadline, overdue }
+
 class _LightDoHomePageState extends State<LightDoHomePage> {
   final TextEditingController _inputController = TextEditingController();
 
@@ -512,31 +514,60 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
 
   List<TodoItem> get _activeTodos {
     final now = DateTime.now();
-    final todos = _todos
+    final active = _todos
         .where((todo) => !todo.isCompleted && !todo.isDeleted)
         .toList(growable: true);
-    todos.sort((a, b) {
-      final bucketCompare =
-          _activeTodoSortBucket(a, now).compareTo(_activeTodoSortBucket(b, now));
-      if (bucketCompare != 0) {
-        return bucketCompare;
-      }
-      final aDue = a.dueAt;
-      final bDue = b.dueAt;
-      if (aDue != null && bDue != null) {
-        final dueCompare = aDue.compareTo(bDue);
-        if (dueCompare != 0) {
-          return dueCompare;
-        }
-      }
-      return b.updatedAt.compareTo(a.updatedAt);
-    });
-    return todos;
+    active.sort((a, b) => _compareActiveTodoOrder(a, b, now));
+    return active;
   }
 
   List<TodoItem> get _completedTodos => _todos
       .where((todo) => todo.isCompleted && !todo.isDeleted)
       .toList(growable: false);
+
+  int _compareActiveTodoOrder(TodoItem a, TodoItem b, DateTime now) {
+    final aGroup = _activeTodoOrderGroup(a, now);
+    final bGroup = _activeTodoOrderGroup(b, now);
+    final byGroup = aGroup.index.compareTo(bGroup.index);
+    if (byGroup != 0) {
+      return byGroup;
+    }
+
+    final aDue = a.dueAt;
+    final bDue = b.dueAt;
+    if (aGroup == _ActiveTodoOrderGroup.upcoming &&
+        aDue != null &&
+        bDue != null) {
+      final byDue = aDue.compareTo(bDue);
+      if (byDue != 0) {
+        return byDue;
+      }
+    } else if (aGroup == _ActiveTodoOrderGroup.overdue &&
+        aDue != null &&
+        bDue != null) {
+      final byDue = bDue.compareTo(aDue);
+      if (byDue != 0) {
+        return byDue;
+      }
+    }
+
+    final byUpdate = b.updatedAt.compareTo(a.updatedAt);
+    if (byUpdate != 0) {
+      return byUpdate;
+    }
+    return a.id.compareTo(b.id);
+  }
+
+  _ActiveTodoOrderGroup _activeTodoOrderGroup(TodoItem todo, DateTime now) {
+    final dueAt = todo.dueAt;
+    if (dueAt == null) {
+      return _ActiveTodoOrderGroup.noDeadline;
+    }
+    if (dueAt.isBefore(now)) {
+      return _ActiveTodoOrderGroup.overdue;
+    }
+    return _ActiveTodoOrderGroup.upcoming;
+  }
 
   bool _containsRecurringInstance(List<TodoItem> todos, TodoItem candidate) {
     return todos.any((todo) {
@@ -548,17 +579,6 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
           todo.dueAt!.isAtSameMomentAs(candidate.dueAt!);
       return sameSeries && sameDueAt;
     });
-  }
-
-  int _activeTodoSortBucket(TodoItem todo, DateTime now) {
-    final dueAt = todo.dueAt;
-    if (dueAt == null) {
-      return 1;
-    }
-    if (dueAt.isBefore(now)) {
-      return 2;
-    }
-    return 0;
   }
 
   @override
@@ -626,8 +646,8 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                       ? const _EmptyState()
                                       : ListView.separated(
                                           itemCount: activeTodos.length,
-                                          separatorBuilder: (_, __) =>
-                                              const SizedBox(height: 10),
+                                          separatorBuilder: (_, _) =>
+                                              const SizedBox(height: 8),
                                           itemBuilder: (context, index) {
                                             final todo = activeTodos[index];
                                             return _TodoCard(
@@ -1233,10 +1253,10 @@ class _TodoCard extends StatelessWidget {
                     ],
                   ],
                 ),
-                if (summary.isNotEmpty) ...[
+                if (todo.dueAt != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    summary,
+                    todo.summary,
                     style: Theme.of(
                       context,
                     ).textTheme.bodySmall?.copyWith(color: summaryColor),
@@ -1482,6 +1502,21 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     );
   }
 
+  Future<void> _pickDraftDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _draftDate,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+      helpText: '选择截止日期',
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+    _updateDraftDate(picked);
+  }
+
   void _updateDraftDate(DateTime value) {
     setState(() {
       _draftDate = DateTime(
@@ -1539,6 +1574,13 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
       _defaultDueHour,
       0,
     );
+  }
+
+  static String _formatDate(DateTime value) {
+    final y = value.year.toString().padLeft(4, '0');
+    final m = value.month.toString().padLeft(2, '0');
+    final d = value.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
   }
 }
 
