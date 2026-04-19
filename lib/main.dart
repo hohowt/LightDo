@@ -1351,7 +1351,7 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
                         const Icon(Icons.calendar_month_rounded, size: 18),
                         const SizedBox(width: 8),
                         Text(
-                          '${_draftDate.year.toString().padLeft(4, '0')}-${_draftDate.month.toString().padLeft(2, '0')}-${_draftDate.day.toString().padLeft(2, '0')}',
+                          _formatDateOnly(_draftDate),
                         ),
                       ],
                     ),
@@ -1509,6 +1509,10 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
       _draftHour,
       _draftMinute,
     );
+  }
+
+  String _formatDateOnly(DateTime value) {
+    return formatShortDateTime(value).split(' ').first;
   }
 
   static DateTime _defaultDueAt() {
