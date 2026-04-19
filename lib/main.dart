@@ -487,21 +487,6 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     _scheduleSave();
   }
 
-  void _reorderActiveTodos(int oldIndex, int newIndex) {
-    final activeTodos = _activeTodos.toList(growable: true);
-    if (newIndex > oldIndex) {
-      newIndex -= 1;
-    }
-    final item = activeTodos.removeAt(oldIndex);
-    activeTodos.insert(newIndex, item);
-    final completedTodos = _completedTodos;
-
-    setState(() {
-      _todos = [...activeTodos, ...completedTodos];
-    });
-    _scheduleSave();
-  }
-
   void _updateSettings(AppSettings nextSettings) {
     setState(() {
       _settings = nextSettings;
@@ -525,9 +510,29 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     }
   }
 
-  List<TodoItem> get _activeTodos => _todos
-      .where((todo) => !todo.isCompleted && !todo.isDeleted)
-      .toList(growable: false);
+  List<TodoItem> get _activeTodos {
+    final now = DateTime.now();
+    final todos = _todos
+        .where((todo) => !todo.isCompleted && !todo.isDeleted)
+        .toList(growable: true);
+    todos.sort((a, b) {
+      final bucketCompare =
+          _activeTodoSortBucket(a, now).compareTo(_activeTodoSortBucket(b, now));
+      if (bucketCompare != 0) {
+        return bucketCompare;
+      }
+      final aDue = a.dueAt;
+      final bDue = b.dueAt;
+      if (aDue != null && bDue != null) {
+        final dueCompare = aDue.compareTo(bDue);
+        if (dueCompare != 0) {
+          return dueCompare;
+        }
+      }
+      return b.updatedAt.compareTo(a.updatedAt);
+    });
+    return todos;
+  }
 
   List<TodoItem> get _completedTodos => _todos
       .where((todo) => todo.isCompleted && !todo.isDeleted)
@@ -543,6 +548,17 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
           todo.dueAt!.isAtSameMomentAs(candidate.dueAt!);
       return sameSeries && sameDueAt;
     });
+  }
+
+  int _activeTodoSortBucket(TodoItem todo, DateTime now) {
+    final dueAt = todo.dueAt;
+    if (dueAt == null) {
+      return 1;
+    }
+    if (dueAt.isBefore(now)) {
+      return 2;
+    }
+    return 0;
   }
 
   @override
@@ -608,10 +624,10 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                 Expanded(
                                   child: activeTodos.isEmpty
                                       ? const _EmptyState()
-                                      : ReorderableListView.builder(
-                                          buildDefaultDragHandles: false,
+                                      : ListView.separated(
                                           itemCount: activeTodos.length,
-                                          onReorder: _reorderActiveTodos,
+                                          separatorBuilder: (_, __) =>
+                                              const SizedBox(height: 10),
                                           itemBuilder: (context, index) {
                                             final todo = activeTodos[index];
                                             return _TodoCard(
@@ -626,16 +642,6 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                               onEdit: () => _editTodo(todo),
                                               onDelete: () =>
                                                   _deleteTodo(todo.id),
-                                              handle:
-                                                  ReorderableDragStartListener(
-                                                    index: index,
-                                                    child: const Icon(
-                                                      Icons
-                                                          .drag_indicator_rounded,
-                                                      color: Color(0xFF7B8A83),
-                                                      size: 18,
-                                                    ),
-                                                  ),
                                             );
                                           },
                                         ),
@@ -1126,7 +1132,6 @@ class _TodoCard extends StatelessWidget {
     required this.onToggle,
     required this.onEdit,
     required this.onDelete,
-    this.handle,
   });
 
   final TodoItem todo;
@@ -1134,11 +1139,11 @@ class _TodoCard extends StatelessWidget {
   final ValueChanged<bool> onToggle;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
-  final Widget? handle;
 
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
+    final summary = todo.summary;
     final deadlineState = todo.deadlineStateAt(now);
     final deadlineBadge = todo.deadlineBadgeLabelAt(now);
     final visualState = todo.isCompleted
@@ -1194,7 +1199,6 @@ class _TodoCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          if (handle != null) ...[handle!, const SizedBox(width: 8)],
           Checkbox(
             value: todo.isCompleted,
             onChanged: (value) => onToggle(value ?? false),
@@ -1229,13 +1233,15 @@ class _TodoCard extends StatelessWidget {
                     ],
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  todo.summary,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: summaryColor),
-                ),
+                if (summary.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    summary,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: summaryColor),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1288,7 +1294,6 @@ class _TodoScheduleDialog extends StatefulWidget {
 }
 
 class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
-  final GlobalKey<FormState> _datePickerFormKey = GlobalKey<FormState>();
   late DateTime _draftDate = widget.initialDueAt ?? _defaultDueAt();
   late int _draftHour = (widget.initialDueAt ?? _draftDate).hour;
   late int _draftMinute = (widget.initialDueAt ?? _draftDate).minute;
@@ -1333,18 +1338,23 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
               ),
               if (_scheduleEnabled) ...[
                 const SizedBox(height: 8),
-                Form(
-                  key: _datePickerFormKey,
-                  child: InputDatePickerFormField(
-                    initialDate: _draftDate,
-                    firstDate: DateTime(DateTime.now().year - 1),
-                    lastDate: DateTime(DateTime.now().year + 5),
-                    fieldLabelText: '截止日期',
-                    fieldHintText: 'yyyy/mm/dd',
-                    onDateSubmitted: _updateDraftDate,
-                    onDateSaved: _updateDraftDate,
-                    errorFormatText: '日期格式不正确',
-                    errorInvalidText: '日期不在允许范围内',
+                InkWell(
+                  onTap: _pickDraftDate,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: '截止日期',
+                      border: OutlineInputBorder(),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_month_rounded, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${_draftDate.year.toString().padLeft(4, '0')}-${_draftDate.month.toString().padLeft(2, '0')}-${_draftDate.day.toString().padLeft(2, '0')}',
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1449,15 +1459,6 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
         ),
         FilledButton(
           onPressed: () {
-            if (_scheduleEnabled) {
-              final formState = _datePickerFormKey.currentState;
-              if (formState != null) {
-                if (!formState.validate()) {
-                  return;
-                }
-                formState.save();
-              }
-            }
             Navigator.of(context).pop(
               _TodoScheduleDraft(
                 dueAt: _scheduleEnabled ? _composeDraftDueAt() : null,
@@ -1485,6 +1486,21 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
     });
   }
 
+  Future<void> _pickDraftDate() async {
+    final now = DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: _draftDate,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+      helpText: '选择截止日期',
+    );
+    if (selected == null || !mounted) {
+      return;
+    }
+    _updateDraftDate(selected);
+  }
+
   DateTime _composeDraftDueAt() {
     return DateTime(
       _draftDate.year,
@@ -1496,13 +1512,13 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
   }
 
   static DateTime _defaultDueAt() {
-    final initial = DateTime.now().add(const Duration(hours: 1));
+    final initial = DateTime.now();
     return DateTime(
       initial.year,
       initial.month,
       initial.day,
-      initial.hour,
-      initial.minute,
+      12,
+      0,
     );
   }
 }
