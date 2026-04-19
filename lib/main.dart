@@ -190,6 +190,10 @@ class LightDoHomePage extends StatefulWidget {
 }
 
 class _LightDoHomePageState extends State<LightDoHomePage> {
+  static const int _dueRankWithDeadline = 0;
+  static const int _dueRankWithoutDeadline = 1;
+  static const int _dueRankOverdue = 2;
+
   final TextEditingController _inputController = TextEditingController();
 
   List<TodoItem> _todos = const [];
@@ -552,15 +556,17 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     final bOverdue = b.dueAt != null && b.dueAt!.isBefore(now);
 
     final aRank = aOverdue
-        ? 2
-        : (a.dueAt != null ? 0 : 1); // 0: 有截止日期, 1: 无截止日期, 2: 已过期
-    final bRank = bOverdue ? 2 : (b.dueAt != null ? 0 : 1);
+        ? _dueRankOverdue
+        : (a.dueAt != null ? _dueRankWithDeadline : _dueRankWithoutDeadline);
+    final bRank = bOverdue
+        ? _dueRankOverdue
+        : (b.dueAt != null ? _dueRankWithDeadline : _dueRankWithoutDeadline);
 
     if (aRank != bRank) {
       return aRank.compareTo(bRank);
     }
 
-    if (aRank == 0 || aRank == 2) {
+    if (aRank == _dueRankWithDeadline || aRank == _dueRankOverdue) {
       final dueCompare = a.dueAt!.compareTo(b.dueAt!);
       if (dueCompare != 0) {
         return dueCompare;
@@ -1316,6 +1322,9 @@ class _TodoScheduleDialog extends StatefulWidget {
 }
 
 class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
+  static const int _defaultDueHour = 12;
+  static const int _defaultDueMinute = 0;
+
   late DateTime _draftDate = widget.initialDueAt ?? _defaultDueAt();
   late int _draftHour = (widget.initialDueAt ?? _draftDate).hour;
   late int _draftMinute = (widget.initialDueAt ?? _draftDate).minute;
@@ -1528,8 +1537,8 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
       initial.year,
       initial.month,
       initial.day,
-      12,
-      0,
+      _defaultDueHour,
+      _defaultDueMinute,
     );
   }
 }
