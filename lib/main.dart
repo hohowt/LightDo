@@ -188,7 +188,8 @@ class LightDoHomePage extends StatefulWidget {
   State<LightDoHomePage> createState() => _LightDoHomePageState();
 }
 
-class _LightDoHomePageState extends State<LightDoHomePage> {
+class _LightDoHomePageState extends State<LightDoHomePage>
+    with WidgetsBindingObserver {
   final TextEditingController _inputController = TextEditingController();
 
   List<TodoItem> _todos = const [];
@@ -205,17 +206,26 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_initAll());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
     _syncSub?.cancel();
     _syncService.dispose();
     _inputController.dispose();
     unawaited(widget.desktopIntegration.dispose());
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && Platform.isAndroid) {
+      unawaited(_syncService.reconnectIfNeeded());
+    }
   }
 
   Future<void> _initAll() async {
@@ -1331,16 +1341,22 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
               ),
               if (_scheduleEnabled) ...[
                 const SizedBox(height: 8),
-                InputDatePickerFormField(
-                  initialDate: _draftDate,
-                  firstDate: DateTime(DateTime.now().year - 1),
-                  lastDate: DateTime(DateTime.now().year + 5),
-                  fieldLabelText: '截止日期',
-                  fieldHintText: 'yyyy/mm/dd',
-                  onDateSubmitted: _updateDraftDate,
-                  onDateSaved: _updateDraftDate,
-                  errorFormatText: '日期格式不正确',
-                  errorInvalidText: '日期不在允许范围内',
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _draftDate,
+                      firstDate: DateTime(DateTime.now().year - 1),
+                      lastDate: DateTime(DateTime.now().year + 5),
+                    );
+                    if (picked != null) _updateDraftDate(picked);
+                  },
+                  icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                  label: Text(
+                    '${_draftDate.year}-'
+                    '${_draftDate.month.toString().padLeft(2, '0')}-'
+                    '${_draftDate.day.toString().padLeft(2, '0')}',
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Row(
