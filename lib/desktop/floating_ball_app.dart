@@ -41,12 +41,13 @@ class FloatingBallHome extends StatefulWidget {
 }
 
 class _FloatingBallHomeState extends State<FloatingBallHome>
-    with WindowListener {
+    with WindowListener, TickerProviderStateMixin {
   static final Size _ballWindowSize = Platform.isWindows
       ? const Size(76, 78)
       : const Size(76, 76);
   static const double _launchTopPadding = 28;
   static const double _launchRightPadding = 24;
+  static const double _snapThreshold = 30;
 
   final LightDoStorage _storage = const FileLightDoStorage();
   final SystemTray _systemTray = SystemTray();
@@ -63,11 +64,25 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   bool _launchAtStartupEnabled = false;
   bool _coveredByMain = false;
   bool _hasOverdueTodos = false;
+  int _activeTodoCount = 0;
+  bool _isHovered = false;
+  bool _isSnapped = false;
   Timer? _overduePollTimer;
+  Timer? _snapDebounceTimer;
+
+  late final AnimationController _breatheController;
+  late final Animation<double> _breatheAnimation;
 
   @override
   void initState() {
     super.initState();
+    _breatheController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    );
+    _breatheAnimation = Tween<double>(begin: 1.0, end: 1.04).animate(
+      CurvedAnimation(parent: _breatheController, curve: Curves.easeInOut),
+    );
     unawaited(_initialize());
   }
 
@@ -76,6 +91,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     windowManager.removeListener(this);
     unawaited(hotKeyManager.unregisterAll());
     _overduePollTimer?.cancel();
+    _snapDebounceTimer?.cancel();
+    _breatheController.dispose();
     if (_trayReady && Platform.isWindows) {
       unawaited(_systemTray.destroy());
     }
@@ -111,11 +128,21 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     windowManager.addListener(this);
     await _prepareFloatingBallWindow();
     await _loadSettings();
-    _startOverdueMonitoring();
+    _startMonitoring();
+    _startBreathing();
     unawaited(_warmUpEditorWindow());
     if (Platform.isWindows) {
       await _setupTray();
     }
+  }
+
+  void _startBreathing() {
+    // Start idle breathing after a brief delay to avoid clashing with launch.
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        _breatheController.repeat(reverse: true);
+      }
+    });
   }
 
   Future<void> _prepareFloatingBallWindow() async {
@@ -169,42 +196,41 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     await _syncHotKey();
   }
 
-  void _startOverdueMonitoring() {
+  void _startMonitoring() {
     _overduePollTimer?.cancel();
     _overduePollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      unawaited(_refreshOverdueState());
+      unawaited(_refreshBallState());
     });
-    unawaited(_refreshOverdueState());
+    unawaited(_refreshBallState());
   }
 
-  Future<void> _refreshOverdueState() async {
+  Future<void> _refreshBallState() async {
     try {
       final snapshot = await _storage.load();
       final now = DateTime.now();
-      final hasOverdue = snapshot.todos.any(
-        (todo) =>
-            !todo.isDeleted &&
-            !todo.isCompleted &&
-            todo.deadlineStateAt(now) == TodoDeadlineState.overdue,
-      );
-      if (!mounted) {
-        return;
+      var hasOverdue = false;
+      var activeCount = 0;
+      for (final todo in snapshot.todos) {
+        if (todo.isDeleted) continue;
+        if (todo.isCompleted) continue;
+        activeCount++;
+        if (todo.deadlineStateAt(now) == TodoDeadlineState.overdue) {
+          hasOverdue = true;
+        }
       }
-      if (_hasOverdueTodos == hasOverdue) {
-        return;
+      if (!mounted) return;
+      if (_hasOverdueTodos != hasOverdue ||
+          _activeTodoCount != activeCount) {
+        setState(() {
+          _hasOverdueTodos = hasOverdue;
+          _activeTodoCount = activeCount;
+        });
       }
-      setState(() {
-        _hasOverdueTodos = hasOverdue;
-      });
-    } catch (_) {
-      return;
-    }
+    } catch (_) {}
   }
 
   Future<void> _syncLaunchAtStartup() async {
-    if (!Platform.isWindows) {
-      return;
-    }
+    if (!Platform.isWindows) return;
     launchAtStartup.setup(
       appName: 'LightDo',
       appPath: Platform.resolvedExecutable,
@@ -221,9 +247,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
 
   Future<void> _syncHotKey() async {
     await hotKeyManager.unregisterAll();
-    if (!_hotKeyEnabled) {
-      return;
-    }
+    if (!_hotKeyEnabled) return;
     await hotKeyManager.register(
       _toggleHotKey,
       keyDownHandler: (_) async {
@@ -290,9 +314,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   Future<void> _openMainWindow() async {
     await _spawnEditorWindowIfNeeded();
     final controller = _editorWindowController;
-    if (controller == null) {
-      return;
-    }
+    if (controller == null) return;
     final position = await windowManager.getPosition();
     final size = await windowManager.getSize();
     final display = await _resolveDisplayForBall(position, size);
@@ -330,11 +352,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
         await Future<void>.delayed(const Duration(milliseconds: 120));
       }
     }
-    // Controller is stale — reset so next tap spawns a fresh window.
     _editorWindowController = null;
-    if (lastError != null) {
-      throw lastError;
-    }
+    if (lastError != null) throw lastError;
   }
 
   Future<Display> _resolveDisplayForBall(Offset position, Size size) async {
@@ -342,26 +361,21 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     if (displays.isEmpty) {
       return screenRetriever.getPrimaryDisplay();
     }
-
     final ballCenter = Offset(
       position.dx + size.width / 2,
       position.dy + size.height / 2,
     );
     Display? bestDisplay;
     double? bestDistance;
-
     for (final display in displays) {
       final displayRect = _displayRect(display);
-      if (displayRect.contains(ballCenter)) {
-        return display;
-      }
+      if (displayRect.contains(ballCenter)) return display;
       final distance = _distanceToRect(ballCenter, displayRect);
       if (bestDistance == null || distance < bestDistance) {
         bestDistance = distance;
         bestDisplay = display;
       }
     }
-
     return bestDisplay ?? screenRetriever.getPrimaryDisplay();
   }
 
@@ -385,6 +399,60 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     return dx * dx + dy * dy;
   }
 
+  // ── Edge snapping ────────────────────────────────────────────────────
+
+  @override
+  void onWindowMove() {
+    _snapDebounceTimer?.cancel();
+    _snapDebounceTimer = Timer(const Duration(milliseconds: 400), () {
+      unawaited(_trySnapToEdge());
+    });
+  }
+
+  @override
+  void onWindowMoved() {
+    _snapDebounceTimer?.cancel();
+    unawaited(_trySnapToEdge());
+  }
+
+  Future<void> _trySnapToEdge() async {
+    if (_coveredByMain || !mounted) return;
+    final position = await windowManager.getPosition();
+    final display = await screenRetriever.getPrimaryDisplay();
+    final visibleX = display.visiblePosition?.dx ?? 0;
+    final visibleWidth = display.visibleSize?.width ?? display.size.width;
+    final ballCenterX = position.dx + _ballWindowSize.width / 2;
+    final ballCenterY = position.dy + _ballWindowSize.height / 2;
+    final visibleY = display.visiblePosition?.dy ?? 0;
+    final visibleHeight = display.visibleSize?.height ?? display.size.height;
+
+    int newX = position.dx;
+    int newY = position.dy;
+
+    // Horizontal snap
+    if (ballCenterX - visibleX < _snapThreshold) {
+      newX = visibleX;
+    } else if (visibleX + visibleWidth - ballCenterX < _snapThreshold) {
+      newX = (visibleX + visibleWidth - _ballWindowSize.width).toInt();
+    }
+
+    // Vertical snap — only snap to top edge
+    if (ballCenterY - visibleY < _snapThreshold + 10) {
+      newY = visibleY;
+    }
+
+    if (newX != position.dx || newY != position.dy) {
+      await windowManager.setPosition(
+        Offset(newX.toDouble(), newY.toDouble()),
+      );
+      if (mounted) setState(() => _isSnapped = true);
+    } else {
+      if (mounted) setState(() => _isSnapped = false);
+    }
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final gradientColors = _ballGradientColors(
@@ -397,15 +465,47 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
         ? AppColors.ballBorderCovered
         : AppColors.ballBorderNormal.withValues(alpha: 0.82);
 
+    final ball = _buildBall(gradientColors, borderColor);
+
     return Material(
       type: MaterialType.transparency,
       child: Center(
         child: DragToMoveArea(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              unawaited(_openMainWindow());
-            },
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ball,
+              if (_activeTodoCount > 0) _buildBadge(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBall(List<Color> gradientColors, Color borderColor) {
+    final shadowAlpha = _isHovered ? 0.28 : 0.18;
+    final ballOpacity = _isSnapped ? 0.5 : 1.0;
+
+    return MouseRegion(
+      onEnter: (_) {
+        if (mounted) setState(() => _isHovered = true);
+      },
+      onExit: (_) {
+        if (mounted) setState(() => _isHovered = false);
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          unawaited(_openMainWindow());
+        },
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 200),
+          opacity: ballOpacity,
+          child: AnimatedScale(
+            scale: _isHovered ? 1.05 : _breatheAnimation.value,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
             child: Container(
               width: 76,
               height: 76,
@@ -419,8 +519,10 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
                 border: Border.all(color: borderColor, width: 2),
                 boxShadow: [
                   BoxShadow(
-                    color: AppColors.ballShadowColor.withValues(alpha: 0.18),
-                    blurRadius: 18,
+                    color: AppColors.ballShadowColor.withValues(
+                      alpha: shadowAlpha,
+                    ),
+                    blurRadius: _isHovered ? 24 : 18,
                     offset: const Offset(0, 8),
                   ),
                 ],
@@ -432,6 +534,31 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBadge() {
+    return Positioned(
+      right: -2,
+      top: -2,
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEF4444),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white, width: 1.5),
+        ),
+        child: Text(
+          _activeTodoCount > 99 ? '99+' : '$_activeTodoCount',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+          textAlign: TextAlign.center,
         ),
       ),
     );
