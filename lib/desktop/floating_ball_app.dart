@@ -10,9 +10,12 @@ import 'package:screen_retriever/screen_retriever.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'ball_quick_menu.dart';
 import 'window_arguments.dart';
 import '../models/todo_item.dart';
 import '../services/lightdo_storage.dart';
+import '../theme/app_theme.dart';
+import '../theme/colors.dart';
 
 class FloatingBallApp extends StatelessWidget {
   const FloatingBallApp({super.key, required this.ballWindowId});
@@ -23,15 +26,7 @@ class FloatingBallApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
-        scaffoldBackgroundColor: Colors.transparent,
-        canvasColor: Colors.transparent,
-        splashColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-        hoverColor: Colors.transparent,
-        shadowColor: Colors.transparent,
-      ),
+      theme: AppTheme.floatingBall(),
       home: FloatingBallHome(ballWindowId: ballWindowId),
     );
   }
@@ -47,12 +42,15 @@ class FloatingBallHome extends StatefulWidget {
 }
 
 class _FloatingBallHomeState extends State<FloatingBallHome>
-    with WindowListener {
+    with WindowListener, TickerProviderStateMixin {
   static final Size _ballWindowSize = Platform.isWindows
       ? const Size(76, 78)
       : const Size(76, 76);
   static const double _launchTopPadding = 28;
   static const double _launchRightPadding = 24;
+  static const double _snapThreshold = 30;
+  static final Size _menuWindowSize = const Size(220, 170);
+  static final Offset _ballOffsetInMenu = const Offset(72, 94);
 
   final LightDoStorage _storage = const FileLightDoStorage();
   final SystemTray _systemTray = SystemTray();
@@ -69,11 +67,26 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   bool _launchAtStartupEnabled = false;
   bool _coveredByMain = false;
   bool _hasOverdueTodos = false;
+  int _activeTodoCount = 0;
+  bool _isHovered = false;
+  bool _isSnapped = false;
+  bool _showQuickMenu = false;
   Timer? _overduePollTimer;
+  Timer? _snapDebounceTimer;
+
+  late final AnimationController _breatheController;
+  late final Animation<double> _breatheAnimation;
 
   @override
   void initState() {
     super.initState();
+    _breatheController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    );
+    _breatheAnimation = Tween<double>(begin: 1.0, end: 1.04).animate(
+      CurvedAnimation(parent: _breatheController, curve: Curves.easeInOut),
+    );
     unawaited(_initialize());
   }
 
@@ -82,6 +95,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     windowManager.removeListener(this);
     unawaited(hotKeyManager.unregisterAll());
     _overduePollTimer?.cancel();
+    _snapDebounceTimer?.cancel();
+    _breatheController.dispose();
     if (_trayReady && Platform.isWindows) {
       unawaited(_systemTray.destroy());
     }
@@ -117,11 +132,21 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     windowManager.addListener(this);
     await _prepareFloatingBallWindow();
     await _loadSettings();
-    _startOverdueMonitoring();
+    _startMonitoring();
+    _startBreathing();
     unawaited(_warmUpEditorWindow());
     if (Platform.isWindows) {
       await _setupTray();
     }
+  }
+
+  void _startBreathing() {
+    // Start idle breathing after a brief delay to avoid clashing with launch.
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        _breatheController.repeat(reverse: true);
+      }
+    });
   }
 
   Future<void> _prepareFloatingBallWindow() async {
@@ -175,42 +200,41 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     await _syncHotKey();
   }
 
-  void _startOverdueMonitoring() {
+  void _startMonitoring() {
     _overduePollTimer?.cancel();
     _overduePollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      unawaited(_refreshOverdueState());
+      unawaited(_refreshBallState());
     });
-    unawaited(_refreshOverdueState());
+    unawaited(_refreshBallState());
   }
 
-  Future<void> _refreshOverdueState() async {
+  Future<void> _refreshBallState() async {
     try {
       final snapshot = await _storage.load();
       final now = DateTime.now();
-      final hasOverdue = snapshot.todos.any(
-        (todo) =>
-            !todo.isDeleted &&
-            !todo.isCompleted &&
-            todo.deadlineStateAt(now) == TodoDeadlineState.overdue,
-      );
-      if (!mounted) {
-        return;
+      var hasOverdue = false;
+      var activeCount = 0;
+      for (final todo in snapshot.todos) {
+        if (todo.isDeleted) continue;
+        if (todo.isCompleted) continue;
+        activeCount++;
+        if (todo.deadlineStateAt(now) == TodoDeadlineState.overdue) {
+          hasOverdue = true;
+        }
       }
-      if (_hasOverdueTodos == hasOverdue) {
-        return;
+      if (!mounted) return;
+      if (_hasOverdueTodos != hasOverdue ||
+          _activeTodoCount != activeCount) {
+        setState(() {
+          _hasOverdueTodos = hasOverdue;
+          _activeTodoCount = activeCount;
+        });
       }
-      setState(() {
-        _hasOverdueTodos = hasOverdue;
-      });
-    } catch (_) {
-      return;
-    }
+    } catch (_) {}
   }
 
   Future<void> _syncLaunchAtStartup() async {
-    if (!Platform.isWindows) {
-      return;
-    }
+    if (!Platform.isWindows) return;
     launchAtStartup.setup(
       appName: 'LightDo',
       appPath: Platform.resolvedExecutable,
@@ -227,9 +251,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
 
   Future<void> _syncHotKey() async {
     await hotKeyManager.unregisterAll();
-    if (!_hotKeyEnabled) {
-      return;
-    }
+    if (!_hotKeyEnabled) return;
     await hotKeyManager.register(
       _toggleHotKey,
       keyDownHandler: (_) async {
@@ -296,9 +318,7 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   Future<void> _openMainWindow() async {
     await _spawnEditorWindowIfNeeded();
     final controller = _editorWindowController;
-    if (controller == null) {
-      return;
-    }
+    if (controller == null) return;
     final position = await windowManager.getPosition();
     final size = await windowManager.getSize();
     final display = await _resolveDisplayForBall(position, size);
@@ -336,11 +356,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
         await Future<void>.delayed(const Duration(milliseconds: 120));
       }
     }
-    // Controller is stale — reset so next tap spawns a fresh window.
     _editorWindowController = null;
-    if (lastError != null) {
-      throw lastError;
-    }
+    if (lastError != null) throw lastError;
   }
 
   Future<Display> _resolveDisplayForBall(Offset position, Size size) async {
@@ -348,26 +365,21 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     if (displays.isEmpty) {
       return screenRetriever.getPrimaryDisplay();
     }
-
     final ballCenter = Offset(
       position.dx + size.width / 2,
       position.dy + size.height / 2,
     );
     Display? bestDisplay;
     double? bestDistance;
-
     for (final display in displays) {
       final displayRect = _displayRect(display);
-      if (displayRect.contains(ballCenter)) {
-        return display;
-      }
+      if (displayRect.contains(ballCenter)) return display;
       final distance = _distanceToRect(ballCenter, displayRect);
       if (bestDistance == null || distance < bestDistance) {
         bestDistance = distance;
         bestDisplay = display;
       }
     }
-
     return bestDisplay ?? screenRetriever.getPrimaryDisplay();
   }
 
@@ -391,27 +403,192 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     return dx * dx + dy * dy;
   }
 
+  // ── Edge snapping ────────────────────────────────────────────────────
+
+  @override
+  void onWindowMove() {
+    _snapDebounceTimer?.cancel();
+    _snapDebounceTimer = Timer(const Duration(milliseconds: 400), () {
+      unawaited(_trySnapToEdge());
+    });
+  }
+
+  @override
+  void onWindowMoved() {
+    _snapDebounceTimer?.cancel();
+    unawaited(_trySnapToEdge());
+  }
+
+  Future<void> _trySnapToEdge() async {
+    if (_coveredByMain || !mounted) return;
+    final position = await windowManager.getPosition();
+    final display = await screenRetriever.getPrimaryDisplay();
+    final visibleX = display.visiblePosition?.dx ?? 0;
+    final visibleWidth = display.visibleSize?.width ?? display.size.width;
+    final ballCenterX = position.dx + _ballWindowSize.width / 2;
+    final ballCenterY = position.dy + _ballWindowSize.height / 2;
+    final visibleY = display.visiblePosition?.dy ?? 0;
+    final visibleHeight = display.visibleSize?.height ?? display.size.height;
+
+    int newX = position.dx;
+    int newY = position.dy;
+
+    // Horizontal snap
+    if (ballCenterX - visibleX < _snapThreshold) {
+      newX = visibleX;
+    } else if (visibleX + visibleWidth - ballCenterX < _snapThreshold) {
+      newX = (visibleX + visibleWidth - _ballWindowSize.width).toInt();
+    }
+
+    // Vertical snap — only snap to top edge
+    if (ballCenterY - visibleY < _snapThreshold + 10) {
+      newY = visibleY;
+    }
+
+    if (newX != position.dx || newY != position.dy) {
+      await windowManager.setPosition(
+        Offset(newX.toDouble(), newY.toDouble()),
+      );
+      if (mounted) setState(() => _isSnapped = true);
+    } else {
+      if (mounted) setState(() => _isSnapped = false);
+    }
+  }
+
+  // ── Quick menu ──────────────────────────────────────────────────────
+
+  Future<void> _openQuickMenu() async {
+    if (_showQuickMenu || _coveredByMain) return;
+    // Stop breathing while menu is shown.
+    _breatheController.stop();
+    final position = await windowManager.getPosition();
+    // Expand window so menu items have room; keep ball visually in place.
+    await windowManager.setSize(_menuWindowSize);
+    final newX = position.dx - _ballOffsetInMenu.dx;
+    final newY = position.dy - _ballOffsetInMenu.dy;
+    await windowManager.setPosition(Offset(newX, newY));
+    if (mounted) setState(() => _showQuickMenu = true);
+  }
+
+  Future<void> _closeQuickMenu() async {
+    if (!_showQuickMenu) return;
+    final position = await windowManager.getPosition();
+    if (mounted) setState(() => _showQuickMenu = false);
+    // Restore ball size and screen position.
+    await windowManager.setSize(_ballWindowSize);
+    final restoredX = position.dx + _ballOffsetInMenu.dx;
+    final restoredY = position.dy + _ballOffsetInMenu.dy;
+    await windowManager.setPosition(Offset(restoredX, restoredY));
+    _startBreathing();
+  }
+
+  void _handleMenuAction(BallMenuAction action) {
+    switch (action) {
+      case BallMenuAction.newTodo:
+        unawaited(_openMainWindow());
+      case BallMenuAction.openMain:
+        unawaited(_openMainWindow());
+      case BallMenuAction.searchWeb:
+        // Placeholder — will open default browser
+        break;
+      case BallMenuAction.settings:
+        unawaited(_openMainWindow());
+    }
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
+    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
     final gradientColors = _ballGradientColors(
       hasOverdueTodos: _hasOverdueTodos,
       coveredByMain: _coveredByMain,
+      isDark: isDark,
     );
     final borderColor = _hasOverdueTodos
-        ? const Color(0xFFFFC2B8)
+        ? AppColors.ballBorderOverdue
         : _coveredByMain
-        ? const Color(0xFFF6E3A2)
-        : Colors.white.withValues(alpha: 0.82);
+        ? AppColors.ballBorderCovered
+        : AppColors.ballBorderNormal.withValues(alpha: 0.82);
+
+    final ball = _buildBall(gradientColors, borderColor);
 
     return Material(
       type: MaterialType.transparency,
-      child: Center(
-        child: DragToMoveArea(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              unawaited(_openMainWindow());
-            },
+      child: Stack(
+        children: [
+          // Ball area at the bottom of the expanded window (or centered if normal).
+          if (_showQuickMenu)
+            Positioned(
+              left: _ballOffsetInMenu.dx,
+              top: _ballOffsetInMenu.dy,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [ball, if (_activeTodoCount > 0) _buildBadge()],
+              ),
+            )
+          else
+            Center(
+              child: DragToMoveArea(
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    ball,
+                    if (_activeTodoCount > 0) _buildBadge(),
+                  ],
+                ),
+              ),
+            ),
+          // Quick menu overlay
+          if (_showQuickMenu)
+            BallQuickMenu(
+              ballWindowCenter: Offset(
+                _ballOffsetInMenu.dx + _ballWindowSize.width / 2,
+                _ballOffsetInMenu.dy + _ballWindowSize.height / 2,
+              ),
+              onAction: _handleMenuAction,
+              onDismiss: () => _closeQuickMenu(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBall(List<Color> gradientColors, Color borderColor) {
+    final shadowAlpha = _isHovered ? 0.28 : 0.18;
+    final ballOpacity = _isSnapped ? 0.5 : 1.0;
+
+    return MouseRegion(
+      onEnter: (_) {
+        if (mounted) setState(() => _isHovered = true);
+      },
+      onExit: (_) {
+        if (mounted) setState(() => _isHovered = false);
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (_showQuickMenu) {
+            unawaited(_closeQuickMenu());
+            return;
+          }
+          unawaited(_openMainWindow());
+        },
+        onSecondaryTapUp: (_) {
+          if (_showQuickMenu) {
+            unawaited(_closeQuickMenu());
+          } else {
+            unawaited(_openQuickMenu());
+          }
+        },
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 200),
+          opacity: ballOpacity,
+          child: AnimatedScale(
+            scale: _isHovered ? 1.05 : _breatheAnimation.value,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
             child: Container(
               width: 76,
               height: 76,
@@ -425,15 +602,17 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
                 border: Border.all(color: borderColor, width: 2),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF1D6F5F).withValues(alpha: 0.18),
-                    blurRadius: 18,
+                    color: AppColors.ballShadowColor.withValues(
+                      alpha: shadowAlpha,
+                    ),
+                    blurRadius: _isHovered ? 24 : 18,
                     offset: const Offset(0, 8),
                   ),
                 ],
               ),
               child: const Icon(
                 Icons.checklist_rounded,
-                color: Colors.white,
+                color: AppColors.ballIconColor,
                 size: 28,
               ),
             ),
@@ -443,16 +622,48 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     );
   }
 
+  Widget _buildBadge() {
+    return Positioned(
+      right: -2,
+      top: -2,
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEF4444),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white, width: 1.5),
+        ),
+        child: Text(
+          _activeTodoCount > 99 ? '99+' : '$_activeTodoCount',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
+
   List<Color> _ballGradientColors({
     required bool hasOverdueTodos,
     required bool coveredByMain,
+    required bool isDark,
   }) {
     if (hasOverdueTodos) {
-      return const [Color(0xFFE46048), Color(0xFFCC3A3A)];
+      return isDark
+          ? const [AppColors.ballDarkOverdueStart, AppColors.ballDarkOverdueEnd]
+          : const [AppColors.ballOverdueStart, AppColors.ballOverdueEnd];
     }
     if (coveredByMain) {
-      return const [Color(0xFFD4AF4F), Color(0xFF91B64F)];
+      return isDark
+          ? const [AppColors.ballDarkCoveredStart, AppColors.ballDarkCoveredEnd]
+          : const [AppColors.ballCoveredStart, AppColors.ballCoveredEnd];
     }
-    return const [Color(0xD91A7A68), Color(0xD93CA692)];
+    return isDark
+        ? const [AppColors.ballDarkNormalStart, AppColors.ballDarkNormalEnd]
+        : const [AppColors.ballNormalStart, AppColors.ballNormalEnd];
   }
 }
