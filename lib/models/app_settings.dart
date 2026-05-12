@@ -7,7 +7,12 @@ class AppSettings {
     required this.minimizeToTrayOnClose,
     required this.launchAtStartup,
     required this.enableGlobalHotkey,
+    required this.enableNotifications,
     this.syncEnabled = false,
+    this.themeMode = 0,
+    this.accentColorIndex = 0,
+    this.ballSize = 1,
+    this.ballOpacity = 1.0,
   });
 
   factory AppSettings.defaults() {
@@ -20,6 +25,11 @@ class AppSettings {
       launchAtStartup: false,
       enableGlobalHotkey: true,
       syncEnabled: false,
+      enableNotifications: true,
+      themeMode: 0,
+      accentColorIndex: 0,
+      ballSize: 1,
+      ballOpacity: 1.0,
     );
   }
 
@@ -38,6 +48,11 @@ class AppSettings {
       launchAtStartup: json['launchAtStartup'] as bool? ?? false,
       enableGlobalHotkey: json['enableGlobalHotkey'] as bool? ?? true,
       syncEnabled: json['syncEnabled'] as bool? ?? false,
+      enableNotifications: json['enableNotifications'] as bool? ?? true,
+      themeMode: json['themeMode'] as int? ?? 0,
+      accentColorIndex: json['accentColorIndex'] as int? ?? 0,
+      ballSize: json['ballSize'] as int? ?? 1,
+      ballOpacity: (json['ballOpacity'] as num?)?.toDouble() ?? 1.0,
     );
   }
 
@@ -49,6 +64,11 @@ class AppSettings {
   final bool launchAtStartup;
   final bool enableGlobalHotkey;
   final bool syncEnabled;
+  final bool enableNotifications;
+  final int themeMode;
+  final int accentColorIndex;
+  final int ballSize;
+  final double ballOpacity;
 
   AppSettings copyWith({
     bool? expandCompletedByDefault,
@@ -59,6 +79,11 @@ class AppSettings {
     bool? launchAtStartup,
     bool? enableGlobalHotkey,
     bool? syncEnabled,
+    bool? enableNotifications,
+    int? themeMode,
+    int? accentColorIndex,
+    int? ballSize,
+    double? ballOpacity,
   }) {
     return AppSettings(
       expandCompletedByDefault:
@@ -72,6 +97,11 @@ class AppSettings {
       launchAtStartup: launchAtStartup ?? this.launchAtStartup,
       enableGlobalHotkey: enableGlobalHotkey ?? this.enableGlobalHotkey,
       syncEnabled: syncEnabled ?? this.syncEnabled,
+      enableNotifications: enableNotifications ?? this.enableNotifications,
+      themeMode: themeMode ?? this.themeMode,
+      accentColorIndex: accentColorIndex ?? this.accentColorIndex,
+      ballSize: ballSize ?? this.ballSize,
+      ballOpacity: ballOpacity ?? this.ballOpacity,
     );
   }
 
@@ -85,6 +115,11 @@ class AppSettings {
       'launchAtStartup': launchAtStartup,
       'enableGlobalHotkey': enableGlobalHotkey,
       'syncEnabled': syncEnabled,
+      'enableNotifications': enableNotifications,
+      'themeMode': themeMode,
+      'accentColorIndex': accentColorIndex,
+      'ballSize': ballSize,
+      'ballOpacity': ballOpacity,
     };
   }
 }

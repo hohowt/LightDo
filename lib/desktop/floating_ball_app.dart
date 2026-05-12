@@ -71,6 +71,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   bool _isHovered = false;
   bool _isSnapped = false;
   bool _showQuickMenu = false;
+  int _ballSizeIndex = 1;
+  double _ballOpacity = 1.0;
   Timer? _overduePollTimer;
   Timer? _snapDebounceTimer;
 
@@ -196,6 +198,9 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     final snapshot = await _storage.load();
     _hotKeyEnabled = snapshot.settings.enableGlobalHotkey;
     _launchAtStartupEnabled = snapshot.settings.launchAtStartup;
+    _ballSizeIndex = snapshot.settings.ballSize;
+    _ballOpacity = snapshot.settings.ballOpacity;
+    if (mounted) setState(() {});
     await _syncLaunchAtStartup();
     await _syncHotKey();
   }
@@ -484,12 +489,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
   void _handleMenuAction(BallMenuAction action) {
     switch (action) {
       case BallMenuAction.newTodo:
-        unawaited(_openMainWindow());
       case BallMenuAction.openMain:
-        unawaited(_openMainWindow());
       case BallMenuAction.searchWeb:
-        // Placeholder — will open default browser
-        break;
       case BallMenuAction.settings:
         unawaited(_openMainWindow());
     }
@@ -554,9 +555,12 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
     );
   }
 
+  double get _ballDiameter => switch (_ballSizeIndex) { 0 => 56, 1 => 76, _ => 96 };
+
   Widget _buildBall(List<Color> gradientColors, Color borderColor) {
     final shadowAlpha = _isHovered ? 0.28 : 0.18;
-    final ballOpacity = _isSnapped ? 0.5 : 1.0;
+    final ballOpacity = (_isSnapped ? 0.5 : 1.0) * _ballOpacity;
+    final d = _ballDiameter;
 
     return MouseRegion(
       onEnter: (_) {
@@ -589,8 +593,8 @@ class _FloatingBallHomeState extends State<FloatingBallHome>
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
             child: Container(
-              width: 76,
-              height: 76,
+              width: d,
+              height: d,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: LinearGradient(

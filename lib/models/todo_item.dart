@@ -2,6 +2,40 @@ enum TodoRecurrence { none, daily, weekly, monthly }
 
 enum TodoDeadlineState { normal, dueSoon, overdue }
 
+class SubTask {
+  const SubTask({
+    required this.id,
+    required this.title,
+    this.isCompleted = false,
+  });
+
+  final String id;
+  final String title;
+  final bool isCompleted;
+
+  SubTask copyWith({String? title, bool? isCompleted}) {
+    return SubTask(
+      id: id,
+      title: title ?? this.title,
+      isCompleted: isCompleted ?? this.isCompleted,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'isCompleted': isCompleted,
+      };
+
+  factory SubTask.fromJson(Map<String, dynamic> json) {
+    return SubTask(
+      id: json['id'] as String,
+      title: json['title'] as String? ?? '',
+      isCompleted: json['isCompleted'] as bool? ?? false,
+    );
+  }
+}
+
 extension TodoRecurrenceX on TodoRecurrence {
   String get storageValue {
     switch (this) {
@@ -54,6 +88,8 @@ class TodoItem {
     required this.recurrence,
     required this.seriesId,
     this.isDeleted = false,
+    this.tags = const [],
+    this.subTasks = const [],
   });
 
   factory TodoItem.create({
@@ -100,6 +136,14 @@ class TodoItem {
       recurrence: recurrence,
       seriesId: json['seriesId'] as String?,
       isDeleted: json['isDeleted'] as bool? ?? false,
+      tags: (json['tags'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList(growable: false) ??
+          const [],
+      subTasks: (json['subTasks'] as List<dynamic>?)
+              ?.map((e) => SubTask.fromJson(e as Map<String, dynamic>))
+              .toList(growable: false) ??
+          const [],
     );
   }
 
@@ -114,6 +158,8 @@ class TodoItem {
   final TodoRecurrence recurrence;
   final String? seriesId;
   final bool isDeleted;
+  final List<String> tags;
+  final List<SubTask> subTasks;
 
   bool get isRecurring => recurrence != TodoRecurrence.none && dueAt != null;
 
@@ -153,6 +199,8 @@ class TodoItem {
     String? seriesId,
     DateTime? updatedAt,
     bool? isDeleted,
+    Object? tags = _noChange,
+    Object? subTasks = _noChange,
   }) {
     final nextDueAt = identical(dueAt, _noChange)
         ? this.dueAt
@@ -172,6 +220,12 @@ class TodoItem {
           ? null
           : (seriesId ?? this.seriesId ?? id),
       isDeleted: isDeleted ?? this.isDeleted,
+      tags: identical(tags, _noChange)
+          ? this.tags
+          : (tags as List<String>?) ?? this.tags,
+      subTasks: identical(subTasks, _noChange)
+          ? this.subTasks
+          : (subTasks as List<SubTask>?) ?? this.subTasks,
     );
   }
 
@@ -218,6 +272,8 @@ class TodoItem {
       'recurrence': recurrence.storageValue,
       'seriesId': seriesId,
       'isDeleted': isDeleted,
+      'tags': tags,
+      'subTasks': subTasks.map((s) => s.toJson()).toList(growable: false),
     };
   }
 

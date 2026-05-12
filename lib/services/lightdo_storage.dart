@@ -35,9 +35,14 @@ class FileLightDoStorage extends LightDoStorage {
         .map((item) => TodoItem.fromJson(item as Map<String, dynamic>))
         .toList(growable: false);
 
+    final tags = (json['tags'] as List<dynamic>?)
+        ?.map((t) => t as Map<String, dynamic>)
+        .toList(growable: false);
+
     return AppSnapshot(
       todos: todos,
       settings: AppSettings.fromJson(json['settings'] as Map<String, dynamic>?),
+      tags: tags ?? const [],
     );
   }
 
@@ -49,6 +54,7 @@ class FileLightDoStorage extends LightDoStorage {
       const JsonEncoder.withIndent('  ').convert({
         'todos': snapshot.todos.map((todo) => todo.toJson()).toList(growable: false),
         'settings': snapshot.settings.toJson(),
+        'tags': snapshot.tags,
       }),
     );
   }
@@ -68,6 +74,8 @@ class FileLightDoStorage extends LightDoStorage {
     final file = File('${dir.path}${Platform.pathSeparator}crdt_state.json');
     await file.writeAsString(jsonEncode(records));
   }
+
+  Future<File> resolveFile() async => _resolveFile();
 
   Future<File> _resolveFile() async {
     final directory = await _resolveDataDirectory();

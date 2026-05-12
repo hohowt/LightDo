@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:local_notifier/local_notifier.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'desktop/floating_ball_app.dart';
@@ -12,12 +14,15 @@ import 'theme/app_theme.dart';
 import 'theme/colors.dart';
 import 'models/app_settings.dart';
 import 'models/app_snapshot.dart';
+import 'models/tag.dart';
 import 'models/todo_item.dart';
 import 'services/desktop_integration.dart';
 import 'services/device_id.dart';
 import 'services/lightdo_storage.dart';
 import 'services/sync_service.dart';
+import 'services/undo_history.dart';
 import 'widgets/qr_scanner_page.dart';
+import 'widgets/stats_page.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 Future<void> main([List<String> args = const []]) async {
@@ -149,23 +154,40 @@ class _LaunchContext {
   final LightDoWindowArguments arguments;
 }
 
-class LightDoApp extends StatelessWidget {
+class LightDoApp extends StatefulWidget {
   const LightDoApp({super.key, this.storage, this.desktopIntegration});
 
   final LightDoStorage? storage;
   final DesktopIntegration? desktopIntegration;
 
   @override
+  State<LightDoApp> createState() => _LightDoAppState();
+}
+
+class _LightDoAppState extends State<LightDoApp> {
+  ThemeMode _themeMode = ThemeMode.system;
+  int _accentColorIndex = 0;
+
+  void _onThemeChanged(int themeMode, int accentIndex) {
+    setState(() {
+      _themeMode = ThemeMode.values[themeMode.clamp(0, 2)];
+      _accentColorIndex = accentIndex.clamp(0, AppTheme.accentSeeds.length - 1);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'LightDo',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
-      themeMode: ThemeMode.system,
+      theme: AppTheme.light(accentIndex: _accentColorIndex),
+      darkTheme: AppTheme.dark(accentIndex: _accentColorIndex),
+      themeMode: _themeMode,
       home: LightDoHomePage(
-        storage: storage ?? const FileLightDoStorage(),
-        desktopIntegration: desktopIntegration ?? createDesktopIntegration(),
+        storage: widget.storage ?? const FileLightDoStorage(),
+        desktopIntegration:
+            widget.desktopIntegration ?? createDesktopIntegration(),
+        onThemeChanged: _onThemeChanged,
       ),
     );
   }
@@ -176,10 +198,12 @@ class LightDoHomePage extends StatefulWidget {
     super.key,
     required this.storage,
     required this.desktopIntegration,
+    this.onThemeChanged,
   });
 
   final LightDoStorage storage;
   final DesktopIntegration desktopIntegration;
+  final void Function(int themeMode, int accentIndex)? onThemeChanged;
 
   @override
   State<LightDoHomePage> createState() => _LightDoHomePageState();
@@ -201,6 +225,20 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   late SyncService _syncService = SyncService(nodeId: 'test');
   StreamSubscription<List<TodoItem>>? _syncSub;
 
+  final UndoHistory _undoHistory = UndoHistory();
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  final FocusNode _mainFocusNode = FocusNode();
+  bool _showSearch = false;
+  Timer? _notificationTimer;
+  final Set<String> _notifiedTodoIds = {};
+
+  TagStore _tagStore = TagStore();
+  Set<String> _selectedFilterTags = {};
+  List<String>? _manualOrder;
+  bool _multiSelectMode = false;
+  Set<String> _selectedIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -210,9 +248,13 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _notificationTimer?.cancel();
     _syncSub?.cancel();
     _syncService.dispose();
     _inputController.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    _mainFocusNode.dispose();
     unawaited(widget.desktopIntegration.dispose());
     super.dispose();
   }
@@ -259,9 +301,15 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     setState(() {
       _todos = snapshot.todos;
       _settings = snapshot.settings.copyWith(expandCompletedByDefault: false);
+      _tagStore = TagStore.fromJson(snapshot.tags);
       _isLoading = false;
     });
+    widget.onThemeChanged?.call(
+      _settings.themeMode,
+      _settings.accentColorIndex,
+    );
     unawaited(_initializeDesktopIntegration());
+    _startNotificationCheck();
   }
 
   Future<void> _initializeDesktopIntegration() async {
@@ -288,7 +336,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     _saveTimer = Timer(const Duration(milliseconds: 240), () async {
       try {
         await widget.storage.save(
-          AppSnapshot(todos: _todos, settings: _settings),
+          AppSnapshot(todos: _todos, settings: _settings, tags: _tagStore.toJson()),
         );
         if (widget.storage is FileLightDoStorage) {
           await (widget.storage as FileLightDoStorage)
@@ -324,6 +372,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     );
     _syncService.recordMutation(nextTodo);
     _syncService.notifyPeers();
+    _undoHistory.pushAdd(nextTodo);
     setState(() {
       _todos = [nextTodo, ..._todos];
       _inputController.clear();
@@ -343,6 +392,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     }
     if (targetTodo == null) return;
 
+    final beforeToggle = targetTodo;
     final nextRecurringTodo = selected && !targetTodo.isCompleted
         ? targetTodo.createNextRecurringInstance()
         : null;
@@ -366,13 +416,19 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
 
       _todos = updatedTodos;
     });
+    final afterToggle = _todos.firstWhere((t) => t.id == id);
+    _undoHistory.pushToggle(id, beforeToggle, afterToggle);
     _scheduleSave();
   }
 
   Future<void> _editTodo(TodoItem todo) async {
     final result = await showDialog<_TodoEditorResult>(
       context: context,
-      builder: (context) => _TodoEditorDialog(todo: todo),
+      builder: (context) => _TodoEditorDialog(
+        todo: todo,
+        tagStore: _tagStore,
+        allTags: _allDistinctTags,
+      ),
     );
     final trimmed = result?.title.trim() ?? '';
     if (trimmed.isEmpty) {
@@ -387,11 +443,13 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
             result!.dueAt!.isAtSameMomentAs(todo.dueAt!));
     final noRecurrenceChange =
         (result?.recurrence ?? todo.recurrence) == todo.recurrence;
+    final noTagsChange = _listEquals(result?.tags, todo.tags);
 
-    if (noTitleChange && noDueChange && noRecurrenceChange) {
+    if (noTitleChange && noDueChange && noRecurrenceChange && noTagsChange) {
       return;
     }
 
+    final oldTodo = todo;
     setState(() {
       _todos = _todos
           .map(
@@ -400,15 +458,27 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                     title: trimmed,
                     dueAt: result?.dueAt,
                     recurrence: result?.recurrence,
+                    tags: result?.tags ?? todo.tags,
                   )
                 : item,
           )
           .toList(growable: false);
     });
     final updated = _todos.firstWhere((t) => t.id == todo.id);
+    _undoHistory.pushEdit(todo.id, oldTodo, updated);
     _syncService.recordMutation(updated);
     _syncService.notifyPeers();
     _scheduleSave();
+  }
+
+  static bool _listEquals(List<String>? a, List<String>? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   Future<void> _openComposerScheduleDialog() async {
@@ -437,6 +507,13 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   }
 
   void _deleteTodo(String id) {
+    final target = _todos.cast<TodoItem?>().firstWhere(
+      (t) => t!.id == id,
+      orElse: () => null,
+    );
+    if (target != null) {
+      _undoHistory.pushDelete(target);
+    }
     _syncService.recordDeletion(id);
     _syncService.notifyPeers();
     setState(() {
@@ -488,14 +565,27 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   }
 
   void _updateSettings(AppSettings nextSettings) {
+    final oldNotificationsEnabled = _settings.enableNotifications;
     setState(() {
       _settings = nextSettings;
     });
-    unawaited(_applyDesktopSettings(nextSettings));
+    widget.onThemeChanged?.call(
+      nextSettings.themeMode,
+      nextSettings.accentColorIndex,
+    );
+    unawaited(_applyDesktopSettings(nextSettings, oldNotificationsEnabled));
     _scheduleSave();
   }
 
-  Future<void> _applyDesktopSettings(AppSettings nextSettings) async {
+  Future<void> _applyDesktopSettings(AppSettings nextSettings, bool oldNotificationsEnabled) async {
+    if (!nextSettings.enableNotifications) {
+      _notificationTimer?.cancel();
+      _notificationFailed = false;
+      _notifiedTodoIds.clear();
+    } else if (!oldNotificationsEnabled && nextSettings.enableNotifications) {
+      _notificationFailed = false;
+      _startNotificationCheck();
+    }
     try {
       await widget.desktopIntegration.applySettings(nextSettings);
     } catch (_) {
@@ -522,6 +612,46 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
   List<TodoItem> get _completedTodos => _todos
       .where((todo) => todo.isCompleted && !todo.isDeleted)
       .toList(growable: false);
+
+  List<String> get _allDistinctTags {
+    final names = <String>{};
+    for (final todo in _todos) {
+      names.addAll(todo.tags);
+    }
+    for (final tag in _tagStore.tags) {
+      names.add(tag.name);
+    }
+    return names.toList(growable: false)..sort();
+  }
+
+  List<TodoItem> get _filteredActiveTodos {
+    final active = _activeTodos;
+    if (_selectedFilterTags.isEmpty) return active;
+    return active
+        .where((todo) => todo.tags.any((t) => _selectedFilterTags.contains(t)))
+        .toList(growable: false);
+  }
+
+  List<TodoItem> get _visibleActiveTodos {
+    final filtered = _filteredActiveTodos;
+    if (_manualOrder == null) return filtered;
+    final idSet = <String>{};
+    for (final todo in filtered) {
+      idSet.add(todo.id);
+    }
+    final ordered = <TodoItem>[];
+    for (final id in _manualOrder!) {
+      if (!idSet.contains(id)) continue;
+      final todo = filtered.firstWhere((t) => t.id == id);
+      ordered.add(todo);
+    }
+    for (final todo in filtered) {
+      if (!ordered.any((t) => t.id == todo.id)) {
+        ordered.add(todo);
+      }
+    }
+    return ordered;
+  }
 
   int _compareActiveTodoOrder(TodoItem a, TodoItem b, DateTime now) {
     final aGroup = _activeTodoOrderGroup(a, now);
@@ -572,15 +702,242 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
     });
   }
 
+  void _undo() {
+    final entry = _undoHistory.undo();
+    if (entry == null) return;
+    _applyUndoEntry(entry);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('已撤销'),
+          duration: const Duration(seconds: 1),
+          action: SnackBarAction(label: '重做', onPressed: _redo),
+        ),
+      );
+    }
+  }
+
+  void _redo() {
+    final entry = _undoHistory.redo();
+    if (entry == null) return;
+    _applyRedoEntry(entry);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('已重做'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  void _applyUndoEntry(UndoEntry entry) {
+    switch (entry.actionType) {
+      case UndoActionType.add:
+        setState(() {
+          _todos = _todos
+              .map((t) => t.id == entry.todoId ? t.copyWith(isDeleted: true) : t)
+              .toList(growable: false);
+        });
+        _syncService.recordDeletion(entry.todoId);
+        break;
+      case UndoActionType.delete:
+      case UndoActionType.edit:
+      case UndoActionType.toggle:
+      case UndoActionType.batchDelete:
+      case UndoActionType.batchToggle:
+        if (entry.before != null) {
+          setState(() {
+            _todos = _todos
+                .map((t) => t.id == entry.todoId ? entry.before! : t)
+                .toList(growable: false);
+          });
+          _syncService.recordMutation(entry.before!);
+        }
+        break;
+    }
+    _syncService.notifyPeers();
+    _scheduleSave();
+  }
+
+  void _applyRedoEntry(UndoEntry entry) {
+    switch (entry.actionType) {
+      case UndoActionType.add:
+      case UndoActionType.edit:
+      case UndoActionType.toggle:
+      case UndoActionType.batchDelete:
+      case UndoActionType.batchToggle:
+        if (entry.after != null) {
+          setState(() {
+            _todos = _todos
+                .map((t) => t.id == entry.todoId ? entry.after! : t)
+                .toList(growable: false);
+          });
+          _syncService.recordMutation(entry.after!);
+        }
+        break;
+      case UndoActionType.delete:
+        setState(() {
+          _todos = _todos
+              .map((t) => t.id == entry.todoId ? t.copyWith(isDeleted: true) : t)
+              .toList(growable: false);
+        });
+        _syncService.recordDeletion(entry.todoId);
+        break;
+    }
+    _syncService.notifyPeers();
+    _scheduleSave();
+  }
+
+  void _toggleSubTask(String todoId, String subTaskId, bool completed) {
+    final todo = _todos.firstWhere((t) => t.id == todoId);
+    final updatedSubTasks = todo.subTasks
+        .map((s) => s.id == subTaskId ? s.copyWith(isCompleted: completed) : s)
+        .toList(growable: false);
+    final updated = todo.copyWith(subTasks: updatedSubTasks);
+    setState(() {
+      _todos = _todos.map((t) => t.id == todoId ? updated : t).toList(growable: false);
+    });
+    _syncService.recordMutation(updated);
+    _syncService.notifyPeers();
+    _scheduleSave();
+  }
+
+  void _updateTodoTags(String todoId, List<String> tags) {
+    final todo = _todos.firstWhere((t) => t.id == todoId);
+    final updated = todo.copyWith(tags: tags);
+    setState(() {
+      _todos = _todos.map((t) => t.id == todoId ? updated : t).toList(growable: false);
+    });
+    _syncService.recordMutation(updated);
+    _syncService.notifyPeers();
+    _scheduleSave();
+  }
+
+  void _enterMultiSelect(String todoId) {
+    setState(() {
+      _multiSelectMode = true;
+      _selectedIds = {todoId};
+    });
+  }
+
+  void _exitMultiSelect() {
+    setState(() {
+      _multiSelectMode = false;
+      _selectedIds = {};
+    });
+  }
+
+  void _toggleSelected(String todoId) {
+    setState(() {
+      if (_selectedIds.contains(todoId)) {
+        _selectedIds.remove(todoId);
+        if (_selectedIds.isEmpty) _multiSelectMode = false;
+      } else {
+        _selectedIds.add(todoId);
+      }
+    });
+  }
+
+  void _selectAllVisible() {
+    setState(() {
+      _selectedIds = _visibleActiveTodos.map((t) => t.id).toSet();
+    });
+  }
+
+  void _batchComplete() {
+    final ids = Set<String>.from(_selectedIds);
+    final entries = <UndoEntry>[];
+    setState(() {
+      _todos = _todos.map((t) {
+        if (!ids.contains(t.id) || t.isCompleted) return t;
+        final before = t;
+        final after = t.copyWith(isCompleted: true);
+        entries.add(UndoEntry(actionType: UndoActionType.toggle, todoId: t.id, before: before, after: after));
+        _syncService.recordMutation(after);
+        return after;
+      }).toList(growable: false);
+    });
+    _undoHistory.pushBatch(entries);
+    _syncService.notifyPeers();
+    _exitMultiSelect();
+    _scheduleSave();
+  }
+
+  void _batchDelete() {
+    final ids = Set<String>.from(_selectedIds);
+    final entries = <UndoEntry>[];
+    for (final id in ids) {
+      final todo = _todos.firstWhere((t) => t.id == id);
+      entries.add(UndoEntry(actionType: UndoActionType.delete, todoId: id, before: todo));
+      _syncService.recordDeletion(id);
+    }
+    _undoHistory.pushBatch(entries);
+    _syncService.notifyPeers();
+    setState(() {
+      _todos = _todos.map((t) => ids.contains(t.id) ? t.copyWith(isDeleted: true) : t).toList(growable: false);
+    });
+    _exitMultiSelect();
+    _scheduleSave();
+  }
+
+  void _onReorder(int oldIndex, int newIndex) {
+    final visible = _visibleActiveTodos;
+    if (_manualOrder == null) {
+      _manualOrder = visible.map((t) => t.id).toList(growable: true);
+    }
+    setState(() {
+      if (newIndex > oldIndex) newIndex--;
+      final id = _manualOrder!.removeAt(oldIndex);
+      _manualOrder!.insert(newIndex, id);
+    });
+  }
+
+  void _resetManualSort() {
+    setState(() {
+      _manualOrder = null;
+    });
+  }
+
+  void _openSearch() {
+    setState(() => _showSearch = true);
+    _searchFocusNode.requestFocus();
+  }
+
+  void _closeSearch() {
+    _searchController.clear();
+    setState(() => _showSearch = false);
+    _mainFocusNode.requestFocus();
+  }
+
+  void _focusComposer() {
+    _inputController.text = '';
+    // Focus the composer TextField by requesting focus on the main node first
+    _mainFocusNode.requestFocus();
+  }
+
+  List<TodoItem> _filteredSearchResults() {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query.isEmpty) return _activeTodos;
+    return _activeTodos
+        .where((todo) => todo.title.toLowerCase().contains(query))
+        .toList(growable: false);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final activeTodos = _activeTodos;
+    final activeTodos = _visibleActiveTodos;
     final completedTodos = _completedTodos;
+    final allTags = _allDistinctTags;
     final completedRate = _todos.isEmpty
         ? 0
         : ((completedTodos.length / _todos.length) * 100).round();
 
-    return Scaffold(
+    return Focus(
+      autofocus: true,
+      focusNode: _mainFocusNode,
+      onKeyEvent: _handleKeyEvent,
+      child: Scaffold(
       backgroundColor: AppColors.scaffoldBody,
       body: SafeArea(
         child: Center(
@@ -602,6 +959,12 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                             showWindowsBadge:
                                 Platform.isWindows || Platform.isMacOS,
                             onOpenSettings: () => _openSettingsSheet(context),
+                            onOpenStats: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => StatsPage(todos: _todos),
+                              ),
+                            ),
+                            allTodos: _todos,
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -619,6 +982,25 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                     _composerRecurrence.label,
                                 ].join(' · '),
                         ),
+                        if (allTags.length >= 2) ...[
+                          const SizedBox(height: 8),
+                          _TagFilterRow(
+                            allTags: allTags,
+                            selectedTags: _selectedFilterTags,
+                            tagStore: _tagStore,
+                            onChanged: (tags) => setState(() => _selectedFilterTags = tags),
+                          ),
+                        ],
+                        if (_showSearch) ...[
+                          const SizedBox(height: 12),
+                          _SearchOverlay(
+                            controller: _searchController,
+                            focusNode: _searchFocusNode,
+                            results: _filteredSearchResults(),
+                            onClose: _closeSearch,
+                            onChanged: () => setState(() {}),
+                          ),
+                        ],
                         if (_errorMessage != null) ...[
                           const SizedBox(height: 12),
                           _InlineNotice(message: _errorMessage!),
@@ -626,18 +1008,38 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                         const SizedBox(height: 14),
                         Expanded(
                           child: _TaskPanel(
-                            title: '待办',
-                            subtitle: activeTodos.isEmpty
-                                ? '还没有进行中的任务'
-                                : '${activeTodos.length} 项进行中',
+                            title: _multiSelectMode ? '已选 ${_selectedIds.length} 项' : '待办',
+                            subtitle: _manualOrder != null
+                                ? '手动排序 · ${activeTodos.length} 项进行中'
+                                : activeTodos.isEmpty
+                                    ? '还没有进行中的任务'
+                                    : '${activeTodos.length} 项进行中',
+                            trailing: _manualOrder != null
+                                ? TextButton(
+                                    onPressed: _resetManualSort,
+                                    child: const Text('恢复自动排序'),
+                                  )
+                                : null,
                             child: Column(
                               children: [
                                 Expanded(
                                   child: activeTodos.isEmpty
                                       ? const _EmptyState()
-                                      : ListView.builder(
+                                      : ReorderableListView.builder(
                                           padding: EdgeInsets.zero,
                                           itemCount: activeTodos.length,
+                                          onReorder: _multiSelectMode ? (_, __) {} : _onReorder,
+                                          proxyDecorator: (child, index, animation) {
+                                            return AnimatedBuilder(
+                                              animation: animation,
+                                              builder: (context, child) => Material(
+                                                elevation: 4,
+                                                borderRadius: BorderRadius.circular(14),
+                                                child: child,
+                                              ),
+                                              child: child,
+                                            );
+                                          },
                                           itemBuilder: (context, index) {
                                             final todo = activeTodos[index];
                                             return Padding(
@@ -648,19 +1050,34 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                               child: _TodoCard(
                                                 todo: todo,
                                                 compact: _settings.compactMode,
+                                                multiSelectMode: _multiSelectMode,
+                                                isSelected: _selectedIds.contains(todo.id),
+                                                showDragHandle: _manualOrder != null && !_multiSelectMode,
+                                                dragIndex: index,
                                                 onToggle: (selected) =>
-                                                    _toggleTodo(
-                                                      todo.id,
-                                                      selected,
-                                                    ),
+                                                    _toggleTodo(todo.id, selected),
                                                 onEdit: () => _editTodo(todo),
-                                                onDelete: () =>
-                                                    _deleteTodo(todo.id),
+                                                onDelete: () => _deleteTodo(todo.id),
+                                                onLongPress: () => _enterMultiSelect(todo.id),
+                                                onTap: _multiSelectMode ? () => _toggleSelected(todo.id) : null,
+                                                onToggleSubTask: (subId, val) => _toggleSubTask(todo.id, subId, val),
+                                                tagStore: _tagStore,
                                               ),
                                             );
                                           },
                                         ),
                                 ),
+                                if (_multiSelectMode) ...[
+                                  const SizedBox(height: 8),
+                                  _BatchActionBar(
+                                    selectedCount: _selectedIds.length,
+                                    totalCount: activeTodos.length,
+                                    onSelectAll: _selectAllVisible,
+                                    onComplete: _batchComplete,
+                                    onDelete: _batchDelete,
+                                    onCancel: _exitMultiSelect,
+                                  ),
+                                ],
                                 const SizedBox(height: 16),
                                 _CompletedPanel(
                                   completedTodos: completedTodos,
@@ -689,7 +1106,89 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
           ),
         ),
       ),
+      ),
     );
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    final ctrl = HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
+    final key = event.logicalKey;
+
+    if (ctrl && key == LogicalKeyboardKey.keyF) {
+      _openSearch();
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyN) {
+      _focusComposer();
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyZ) {
+      _undo();
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyY) {
+      _redo();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.escape) {
+      if (_multiSelectMode) {
+        _exitMultiSelect();
+        return KeyEventResult.handled;
+      }
+      if (_showSearch) {
+        _closeSearch();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  void _startNotificationCheck() {
+    if (!_settings.enableNotifications) return;
+    if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return;
+    _notificationTimer?.cancel();
+    _notificationTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _checkNotifications();
+    });
+  }
+
+  LocalNotifier? _localNotifier;
+  bool _notificationFailed = false;
+
+  Future<void> _checkNotifications() async {
+    if (!_settings.enableNotifications || !mounted) return;
+    if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return;
+
+    if (_notificationFailed) return;
+
+    _localNotifier ??= LocalNotifier()
+      ..initialize(appName: 'LightDo');
+
+    final now = DateTime.now();
+    for (final todo in _activeTodos) {
+      if (_notifiedTodoIds.contains(todo.id)) continue;
+      final state = todo.deadlineStateAt(now);
+      if (state == TodoDeadlineState.overdue || state == TodoDeadlineState.dueSoon) {
+        _notifiedTodoIds.add(todo.id);
+        final title = state == TodoDeadlineState.overdue ? '已过期' : '即将到期';
+        try {
+          await _localNotifier!.notify(
+            title: 'LightDo - $title',
+            body: todo.title,
+          );
+        } catch (e) {
+          _notificationFailed = true;
+          debugPrint('LightDo notification failed: $e');
+        }
+      }
+    }
   }
 
   Future<void> _openSettingsSheet(BuildContext context) async {
@@ -725,6 +1224,8 @@ class _HeaderSection extends StatelessWidget {
     required this.completedRate,
     required this.showWindowsBadge,
     required this.onOpenSettings,
+    this.onOpenStats,
+    required this.allTodos,
   });
 
   final int totalCount;
@@ -733,6 +1234,8 @@ class _HeaderSection extends StatelessWidget {
   final int completedRate;
   final bool showWindowsBadge;
   final VoidCallback onOpenSettings;
+  final VoidCallback? onOpenStats;
+  final List<TodoItem> allTodos;
 
   @override
   Widget build(BuildContext context) {
@@ -750,10 +1253,15 @@ class _HeaderSection extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                '总计 $totalCount 项，进行中 $activeCount 项，已完成 $completedCount 项，完成率 $completedRate%',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.textBody,
+              GestureDetector(
+                onTap: onOpenStats,
+                child: Text(
+                  '总计 $totalCount 项，进行中 $activeCount 项，已完成 $completedCount 项，完成率 $completedRate%',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textBody,
+                    decoration: onOpenStats != null ? TextDecoration.underline : null,
+                    decorationColor: AppColors.textBodyAlt,
+                  ),
                 ),
               ),
             ],
@@ -886,11 +1394,13 @@ class _TaskPanel extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.child,
+    this.trailing,
   });
 
   final String title;
   final String subtitle;
   final Widget child;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -899,12 +1409,19 @@ class _TaskPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: AppColors.textSecondary,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              if (trailing != null) trailing!,
+            ],
           ),
           const SizedBox(height: 6),
           Text(
@@ -1139,15 +1656,22 @@ class _CompletedPreviewStrip extends StatelessWidget {
   }
 }
 
-class _TodoCard extends StatelessWidget {
+class _TodoCard extends StatefulWidget {
   const _TodoCard({
-    // ignore: unused_element_parameter
     super.key,
     required this.todo,
     required this.compact,
     required this.onToggle,
     required this.onEdit,
     required this.onDelete,
+    this.multiSelectMode = false,
+    this.isSelected = false,
+    this.showDragHandle = false,
+    this.dragIndex = 0,
+    this.onLongPress,
+    this.onTap,
+    this.onToggleSubTask,
+    this.tagStore,
   });
 
   final TodoItem todo;
@@ -1155,15 +1679,29 @@ class _TodoCard extends StatelessWidget {
   final ValueChanged<bool> onToggle;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final TagStore? tagStore;
+  final bool multiSelectMode;
+  final bool isSelected;
+  final bool showDragHandle;
+  final int dragIndex;
+  final VoidCallback? onLongPress;
+  final VoidCallback? onTap;
+  final void Function(String subTaskId, bool completed)? onToggleSubTask;
+
+  @override
+  State<_TodoCard> createState() => _TodoCardState();
+}
+
+class _TodoCardState extends State<_TodoCard> {
+  bool _showSubtasks = false;
 
   @override
   Widget build(BuildContext context) {
+    final todo = widget.todo;
     final now = DateTime.now();
     final deadlineState = todo.deadlineStateAt(now);
     final deadlineBadge = todo.deadlineBadgeLabelAt(now);
-    final visualState = todo.isCompleted
-        ? TodoDeadlineState.normal
-        : deadlineState;
+    final visualState = todo.isCompleted ? TodoDeadlineState.normal : deadlineState;
     final cardBackground = switch (visualState) {
       TodoDeadlineState.overdue => AppColors.cardOverdueBg,
       TodoDeadlineState.dueSoon => AppColors.cardDueSoonBg,
@@ -1172,7 +1710,9 @@ class _TodoCard extends StatelessWidget {
     final cardBorder = switch (visualState) {
       TodoDeadlineState.overdue => AppColors.cardOverdueBorder,
       TodoDeadlineState.dueSoon => AppColors.cardDueSoonBorder,
-      TodoDeadlineState.normal => AppColors.sectionBorder,
+      TodoDeadlineState.normal => widget.isSelected
+          ? AppColors.composerIconActive
+          : AppColors.sectionBorder,
     };
     final badgeBackground = switch (visualState) {
       TodoDeadlineState.overdue => AppColors.cardOverdueBadgeBg,
@@ -1189,90 +1729,194 @@ class _TodoCard extends StatelessWidget {
       TodoDeadlineState.dueSoon => AppColors.cardDueSoonSummary,
       TodoDeadlineState.normal => AppColors.cardNormalSummary,
     };
-    final summary = todo.summary;
     final titleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
       fontWeight: FontWeight.w600,
       height: 1.25,
       color: todo.isCompleted
           ? AppColors.cardCompletedTitle
           : visualState == TodoDeadlineState.overdue
-          ? AppColors.cardOverdueTitle
-          : visualState == TodoDeadlineState.dueSoon
-          ? AppColors.cardDueSoonTitle
-          : AppColors.cardNormalTitle,
+              ? AppColors.cardOverdueTitle
+              : visualState == TodoDeadlineState.dueSoon
+                  ? AppColors.cardDueSoonTitle
+                  : AppColors.cardNormalTitle,
       decoration: todo.isCompleted ? TextDecoration.lineThrough : null,
     );
 
-    return Container(
-      decoration: BoxDecoration(
-        color: cardBackground,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cardBorder, width: 1.2),
-      ),
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 10 : 12,
-        vertical: compact ? 8 : 10,
-      ),
-      child: Row(
-        children: [
-          Checkbox(
-            value: todo.isCompleted,
-            onChanged: (value) => onToggle(value ?? false),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final completedSubTaskCount = todo.subTasks.where((s) => s.isCompleted).length;
+    final hasSubTasks = todo.subTasks.isNotEmpty;
+
+    return GestureDetector(
+      onLongPress: widget.onLongPress,
+      onTap: widget.onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: widget.isSelected
+              ? AppColors.cardDueSoonBg.withValues(alpha: 0.6)
+              : cardBackground,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cardBorder, width: widget.isSelected ? 2 : 1.2),
+        ),
+        padding: EdgeInsets.symmetric(
+          horizontal: widget.compact ? 10 : 12,
+          vertical: widget.compact ? 8 : 10,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(child: Text(todo.title, style: titleStyle)),
-                    if (deadlineBadge != null) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: badgeBackground,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          deadlineBadge,
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(
-                                color: badgeForeground,
-                                fontWeight: FontWeight.w700,
+                if (widget.multiSelectMode)
+                  Checkbox(
+                    value: widget.isSelected,
+                    onChanged: (_) => widget.onTap?.call(),
+                  )
+                else if (widget.showDragHandle)
+                  ReorderableDragStartListener(
+                    index: widget.dragIndex,
+                    child: const Padding(
+                      padding: EdgeInsets.only(right: 4),
+                      child: Icon(Icons.drag_indicator_rounded, size: 20, color: AppColors.textMuted),
+                    ),
+                  ),
+                Checkbox(
+                  value: todo.isCompleted,
+                  onChanged: (value) => widget.onToggle(value ?? false),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: Text(todo.title, style: titleStyle)),
+                          if (deadlineBadge != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: badgeBackground,
+                                borderRadius: BorderRadius.circular(999),
                               ),
+                              child: Text(
+                                deadlineBadge,
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: badgeForeground,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (todo.summary.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          todo.summary,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: summaryColor),
+                        ),
+                      ],
+                      if (todo.tags.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        _TagChips(tags: todo.tags, tagStore: widget.tagStore),
+                      ],
+                    ],
+                  ),
+                ),
+                if (hasSubTasks)
+                  GestureDetector(
+                    onTap: () => setState(() => _showSubtasks = !_showSubtasks),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.chipBg,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$completedSubTaskCount/${todo.subTasks.length}',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: AppColors.composerIconActive,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ],
-                  ],
-                ),
-                if (summary.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    summary,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: summaryColor),
+                    ),
+                  ),
+                if (!widget.multiSelectMode) ...[
+                  IconButton(
+                    onPressed: widget.onEdit,
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    tooltip: '编辑',
+                  ),
+                  IconButton(
+                    onPressed: widget.onDelete,
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    tooltip: '删除',
                   ),
                 ],
               ],
             ),
-          ),
-          IconButton(
-            onPressed: onEdit,
-            icon: const Icon(Icons.edit_outlined, size: 18),
-            tooltip: '编辑',
-          ),
-          IconButton(
-            onPressed: onDelete,
-            icon: const Icon(Icons.close_rounded, size: 18),
-            tooltip: '删除',
-          ),
-        ],
+            if (_showSubtasks && hasSubTasks) ...[
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              ...todo.subTasks.map((st) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 32,
+                          height: 32,
+                          child: Checkbox(
+                            value: st.isCompleted,
+                            onChanged: (val) => widget.onToggleSubTask?.call(st.id, val ?? false),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            st.title,
+                            style: TextStyle(
+                              fontSize: 13,
+                              decoration: st.isCompleted ? TextDecoration.lineThrough : null,
+                              color: st.isCompleted ? AppColors.textMuted : AppColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )),
+            ],
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _TagChips extends StatelessWidget {
+  const _TagChips({required this.tags, required this.tagStore});
+  final List<String> tags;
+  final TagStore? tagStore;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: tags.map((tag) {
+        final color = tagStore?.colorFor(tag) ?? Tag.colorForTag(tag);
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: color.withValues(alpha: 0.4)),
+          ),
+          child: Text(
+            tag,
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color),
+          ),
+        );
+      }).toList(growable: false),
     );
   }
 }
@@ -1289,9 +1933,11 @@ class _TodoEditorResult extends _TodoScheduleDraft {
     required this.title,
     required super.dueAt,
     required super.recurrence,
+    this.tags = const [],
   });
 
   final String title;
+  final List<String> tags;
 }
 
 class _TodoScheduleDialog extends StatefulWidget {
@@ -1563,9 +2209,11 @@ class _TodoScheduleDialogState extends State<_TodoScheduleDialog> {
 }
 
 class _TodoEditorDialog extends StatefulWidget {
-  const _TodoEditorDialog({required this.todo});
+  const _TodoEditorDialog({required this.todo, required this.tagStore, required this.allTags});
 
   final TodoItem todo;
+  final TagStore tagStore;
+  final List<String> allTags;
 
   @override
   State<_TodoEditorDialog> createState() => _TodoEditorDialogState();
@@ -1577,6 +2225,7 @@ class _TodoEditorDialogState extends State<_TodoEditorDialog> {
   );
   late DateTime? _draftDueAt = widget.todo.dueAt;
   late TodoRecurrence _draftRecurrence = widget.todo.recurrence;
+  late List<String> _draftTags = List<String>.from(widget.todo.tags);
 
   @override
   void dispose() {
@@ -1586,45 +2235,72 @@ class _TodoEditorDialogState extends State<_TodoEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final availableTags = <String>{...widget.allTags, ..._draftTags}.toList()..sort();
+
     return AlertDialog(
       title: const Text('编辑任务'),
       content: SizedBox(
         width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: '任务内容',
-                hintText: '输入新的任务描述',
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: '任务内容',
+                  hintText: '输入新的任务描述',
+                ),
+                onSubmitted: (_) => _submit(),
               ),
-              onSubmitted: (_) => _submit(),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: _openScheduleDialog,
-              icon: const Icon(Icons.event_note_rounded),
-              label: Text(
-                _draftDueAt == null
-                    ? '设置截止时间'
-                    : '截止 ${formatShortDateTime(_draftDueAt!)}',
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _openScheduleDialog,
+                icon: const Icon(Icons.event_note_rounded),
+                label: Text(
+                  _draftDueAt == null
+                      ? '设置截止时间'
+                      : '截止 ${formatShortDateTime(_draftDueAt!)}',
+                ),
               ),
-            ),
-            if (_draftDueAt != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _draftRecurrence == TodoRecurrence.none
-                    ? '当前任务不重复'
-                    : '当前任务按 ${_draftRecurrence.label} 重复',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: AppColors.emptyText),
-              ),
+              if (_draftDueAt != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _draftRecurrence == TodoRecurrence.none
+                      ? '当前任务不重复'
+                      : '当前任务按 ${_draftRecurrence.label} 重复',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.emptyText),
+                ),
+              ],
+              if (availableTags.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text('标签', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: availableTags.map((tag) {
+                    final selected = _draftTags.contains(tag);
+                    return FilterChip(
+                      label: Text(tag),
+                      selected: selected,
+                      onSelected: (sel) {
+                        setState(() {
+                          if (sel) {
+                            _draftTags.add(tag);
+                          } else {
+                            _draftTags.remove(tag);
+                          }
+                        });
+                      },
+                    );
+                  }).toList(growable: false),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
       actions: [
@@ -1661,6 +2337,7 @@ class _TodoEditorDialogState extends State<_TodoEditorDialog> {
         title: _controller.text.trim(),
         dueAt: _draftDueAt,
         recurrence: _draftRecurrence,
+        tags: List<String>.from(_draftTags),
       ),
     );
   }
@@ -1717,11 +2394,53 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       content: SizedBox(
         width: 420,
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: _showQr ? 600 : 340),
+          constraints: BoxConstraints(maxHeight: _showQr ? 680 : 520),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Theme section
+                DropdownButtonFormField<int>(
+                  initialValue: _draft.themeMode,
+                  decoration: const InputDecoration(
+                    labelText: '主题模式',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 0, child: Text('跟随系统')),
+                    DropdownMenuItem(value: 1, child: Text('浅色模式')),
+                    DropdownMenuItem(value: 2, child: Text('深色模式')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _draft = _draft.copyWith(themeMode: value));
+                  },
+                ),
+                const SizedBox(height: 12),
+                Text('主题色', style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: List.generate(AppTheme.accentSeeds.length, (i) {
+                    final selected = _draft.accentColorIndex == i;
+                    return GestureDetector(
+                      onTap: () => setState(() => _draft = _draft.copyWith(accentColorIndex: i)),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: AppTheme.accentSeeds[i],
+                          shape: BoxShape.circle,
+                          border: selected
+                              ? Border.all(color: AppColors.textPrimary, width: 3)
+                              : null,
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+                const Divider(),
                 if (_showDesktopSection) ...[
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -1768,6 +2487,36 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                         });
                       },
                     ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _draft.enableNotifications,
+                    title: const Text('桌面通知提醒'),
+                    subtitle: const Text('到期和临期任务弹出系统通知。'),
+                    onChanged: (value) {
+                      setState(() {
+                        _draft = _draft.copyWith(enableNotifications: value);
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text('悬浮球大小', style: Theme.of(context).textTheme.bodyMedium),
+                  Slider(
+                    value: _draft.ballSize.toDouble(),
+                    min: 0,
+                    max: 2,
+                    divisions: 2,
+                    label: ['小', '中', '大'][_draft.ballSize],
+                    onChanged: (v) => setState(() => _draft = _draft.copyWith(ballSize: v.round())),
+                  ),
+                  Text('悬浮球透明度', style: Theme.of(context).textTheme.bodyMedium),
+                  Slider(
+                    value: _draft.ballOpacity,
+                    min: 0.3,
+                    max: 1.0,
+                    divisions: 7,
+                    label: '${(_draft.ballOpacity * 100).round()}%',
+                    onChanged: (v) => setState(() => _draft = _draft.copyWith(ballOpacity: v)),
+                  ),
                 ],
                 const Divider(),
                 SwitchListTile(
@@ -1873,6 +2622,152 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   }
 }
 
+class _SearchOverlay extends StatefulWidget {
+  const _SearchOverlay({
+    required this.controller,
+    required this.focusNode,
+    required this.results,
+    required this.onClose,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final List<TodoItem> results;
+  final VoidCallback onClose;
+  final VoidCallback onChanged;
+
+  @override
+  State<_SearchOverlay> createState() => _SearchOverlayState();
+}
+
+class _SearchOverlayState extends State<_SearchOverlay> {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.sectionBorder),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.search_rounded, color: AppColors.composerIcon, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: widget.controller,
+                  focusNode: widget.focusNode,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: '搜索待办...',
+                    isCollapsed: true,
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(vertical: 8),
+                  ),
+                  onChanged: (_) => widget.onChanged(),
+                ),
+              ),
+              IconButton(
+                onPressed: widget.onClose,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                tooltip: '关闭搜索',
+              ),
+            ],
+          ),
+          if (widget.controller.text.isNotEmpty) ...[
+            const Divider(),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 300),
+              child: widget.results.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('没有匹配的任务', style: TextStyle(color: AppColors.textMuted)),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: widget.results.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 4),
+                      itemBuilder: (context, index) {
+                        final todo = widget.results[index];
+                        return _SearchResultTile(
+                          todo: todo,
+                          query: widget.controller.text.trim().toLowerCase(),
+                          onTap: widget.onClose,
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchResultTile extends StatelessWidget {
+  const _SearchResultTile({required this.todo, required this.query, required this.onTap});
+
+  final TodoItem todo;
+  final String query;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = todo.title;
+    final lower = title.toLowerCase();
+    final matchIndex = lower.indexOf(query);
+
+    Widget titleWidget;
+    if (query.isEmpty || matchIndex < 0) {
+      titleWidget = Text(title, style: const TextStyle(fontSize: 14));
+    } else {
+      final before = title.substring(0, matchIndex);
+      final match = title.substring(matchIndex, matchIndex + query.length);
+      final after = title.substring(matchIndex + query.length);
+      titleWidget = RichText(
+        text: TextSpan(
+          style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+          children: [
+            if (before.isNotEmpty) TextSpan(text: before),
+            TextSpan(
+              text: match,
+              style: const TextStyle(
+                backgroundColor: Color(0xFFFFF176),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (after.isNotEmpty) TextSpan(text: after),
+          ],
+        ),
+      );
+    }
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          children: [
+            Icon(
+              todo.isCompleted ? Icons.check_circle_rounded : Icons.circle_outlined,
+              size: 16,
+              color: todo.isCompleted ? AppColors.emptyIcon : AppColors.textMuted,
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: titleWidget),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _InlineNotice extends StatelessWidget {
   const _InlineNotice({required this.message});
 
@@ -1892,6 +2787,125 @@ class _InlineNotice extends StatelessWidget {
           const Icon(Icons.warning_amber_rounded, color: AppColors.errorIcon),
           const SizedBox(width: 10),
           Expanded(child: Text(message)),
+        ],
+      ),
+    );
+  }
+}
+
+class _TagFilterRow extends StatelessWidget {
+  const _TagFilterRow({
+    required this.allTags,
+    required this.selectedTags,
+    required this.tagStore,
+    required this.onChanged,
+  });
+
+  final List<String> allTags;
+  final Set<String> selectedTags;
+  final TagStore tagStore;
+  final ValueChanged<Set<String>> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          FilterChip(
+            label: const Text('全部'),
+            selected: selectedTags.isEmpty,
+            onSelected: (_) => onChanged({}),
+            showCheckmark: false,
+          ),
+          const SizedBox(width: 6),
+          ...allTags.map((tag) {
+            final color = tagStore.colorFor(tag);
+            return Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: FilterChip(
+                label: Text(tag),
+                selected: selectedTags.contains(tag),
+                onSelected: (sel) {
+                  final next = Set<String>.from(selectedTags);
+                  if (sel) {
+                    next.add(tag);
+                  } else {
+                    next.remove(tag);
+                  }
+                  onChanged(next);
+                },
+                selectedColor: color.withValues(alpha: 0.2),
+                checkmarkColor: color,
+                side: BorderSide(color: color.withValues(alpha: 0.5)),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+class _BatchActionBar extends StatelessWidget {
+  const _BatchActionBar({
+    required this.selectedCount,
+    required this.totalCount,
+    required this.onSelectAll,
+    required this.onComplete,
+    required this.onDelete,
+    required this.onCancel,
+  });
+
+  final int selectedCount;
+  final int totalCount;
+  final VoidCallback onSelectAll;
+  final VoidCallback onComplete;
+  final VoidCallback onDelete;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.composerIconActive.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          TextButton.icon(
+            onPressed: onSelectAll,
+            icon: Icon(
+              selectedCount == totalCount
+                  ? Icons.deselect_rounded
+                  : Icons.select_all_rounded,
+              size: 18,
+            ),
+            label: Text(selectedCount == totalCount ? '取消全选' : '全选'),
+          ),
+          const Spacer(),
+          Text(
+            '已选 $selectedCount 项',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonalIcon(
+            onPressed: selectedCount > 0 ? onComplete : null,
+            icon: const Icon(Icons.check_rounded, size: 16),
+            label: const Text('完成'),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonalIcon(
+            onPressed: selectedCount > 0 ? onDelete : null,
+            icon: const Icon(Icons.delete_outline_rounded, size: 16),
+            label: const Text('删除'),
+          ),
+          const SizedBox(width: 8),
+          TextButton(onPressed: onCancel, child: const Text('取消')),
         ],
       ),
     );
