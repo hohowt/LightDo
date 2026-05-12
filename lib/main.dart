@@ -871,9 +871,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
 
   void _onReorder(int oldIndex, int newIndex) {
     final visible = _visibleActiveTodos;
-    if (_manualOrder == null) {
-      _manualOrder = visible.map((t) => t.id).toList(growable: true);
-    }
+    _manualOrder ??= visible.map((t) => t.id).toList(growable: true);
     setState(() {
       if (newIndex > oldIndex) newIndex--;
       final id = _manualOrder!.removeAt(oldIndex);
@@ -1016,7 +1014,7 @@ class _LightDoHomePageState extends State<LightDoHomePage> {
                                       : ReorderableListView.builder(
                                           padding: EdgeInsets.zero,
                                           itemCount: activeTodos.length,
-                                          onReorder: _multiSelectMode ? (_, __) {} : _onReorder,
+                                          onReorder: _multiSelectMode ? (_, _) {} : _onReorder,
                                           proxyDecorator: (child, index, animation) {
                                             return AnimatedBuilder(
                                               animation: animation,
@@ -1425,7 +1423,7 @@ class _TaskPanel extends StatelessWidget {
                   ),
                 ),
               ),
-              if (trailing != null) trailing!,
+              ?trailing,
             ],
           ),
           const SizedBox(height: 6),
@@ -1663,6 +1661,7 @@ class _CompletedPreviewStrip extends StatelessWidget {
 
 class _TodoCard extends StatefulWidget {
   const _TodoCard({
+    // ignore: unused_element_parameter
     super.key,
     required this.todo,
     required this.compact,
@@ -2230,7 +2229,7 @@ class _TodoEditorDialogState extends State<_TodoEditorDialog> {
   );
   late DateTime? _draftDueAt = widget.todo.dueAt;
   late TodoRecurrence _draftRecurrence = widget.todo.recurrence;
-  final List<String> _draftTags = List<String>.from(widget.todo.tags);
+  late final List<String> _draftTags = List<String>.from(widget.todo.tags);
 
   @override
   void dispose() {
@@ -2696,7 +2695,7 @@ class _SearchOverlayState extends State<_SearchOverlay> {
                   : ListView.separated(
                       shrinkWrap: true,
                       itemCount: widget.results.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 4),
+                      separatorBuilder: (_, _) => const SizedBox(height: 4),
                       itemBuilder: (context, index) {
                         final todo = widget.results[index];
                         return _SearchResultTile(
