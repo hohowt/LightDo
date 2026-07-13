@@ -29,6 +29,7 @@ class SyncService {
   String? _lastWsUrl;
   String? _lastToken;
   bool _intentionalDisconnect = false;
+  bool _reconnecting = false;
 
   final _todosController = StreamController<List<TodoItem>>.broadcast();
   Stream<List<TodoItem>> get todosStream => _todosController.stream;
@@ -71,10 +72,12 @@ class SyncService {
   }
 
   List<TodoItem> get currentTodos {
-    return _crdt.map.entries
+    final todos = _crdt.map.entries
         .map((e) => TodoItem.fromJson(e.value!))
         .where((t) => !t.isDeleted)
         .toList();
+    todos.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    return todos;
   }
 
   Map<String, dynamic> exportRecords() {
@@ -152,7 +155,7 @@ class SyncService {
   }
 
   Future<void> _doConnect(String wsUrl, String token) async {
-    await disconnect();
+    await disconnect(clearConnection: false);
     final uri = Uri.parse(wsUrl).replace(
       queryParameters: {'token': token},
     );
@@ -168,15 +171,20 @@ class SyncService {
 
   /// Call when app returns to foreground to restore dropped connection.
   Future<void> reconnectIfNeeded() async {
-    if (_intentionalDisconnect) return;
+    if (_intentionalDisconnect || _reconnecting) return;
     if (_clientSocket != null) return;
     final url = _lastWsUrl;
     final token = _lastToken;
     if (url == null || token == null) return;
+
+    _reconnecting = true;
     try {
       await _doConnect(url, token);
     } catch (_) {
       // Server may be unreachable; silently ignore, user can re-scan.
+      _onClientDisconnected();
+    } finally {
+      _reconnecting = false;
     }
   }
 
@@ -193,10 +201,12 @@ class SyncService {
     _clientSub = null;
   }
 
-  Future<void> disconnect() async {
-    _intentionalDisconnect = true;
-    _lastWsUrl = null;
-    _lastToken = null;
+  Future<void> disconnect({bool clearConnection = true}) async {
+    if (clearConnection) {
+      _intentionalDisconnect = true;
+      _lastWsUrl = null;
+      _lastToken = null;
+    }
     await _clientSocket?.close();
     _onClientDisconnected();
   }

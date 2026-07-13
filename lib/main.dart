@@ -211,6 +211,16 @@ class _LightDoHomePageState extends State<LightDoHomePage>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!Platform.isAndroid) return;
+    if (state == AppLifecycleState.paused) {
+      unawaited(_syncService.disconnect(clearConnection: false));
+    } else if (state == AppLifecycleState.resumed) {
+      unawaited(_syncService.reconnectIfNeeded());
+    }
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
@@ -325,12 +335,19 @@ class _LightDoHomePageState extends State<LightDoHomePage>
     if (text.isEmpty) {
       return;
     }
+    final activeTodos = _activeTodos;
+    final nextSortOrder = activeTodos.isEmpty
+        ? 0
+        : activeTodos.map((todo) => todo.sortOrder).reduce(
+              (a, b) => a < b ? a : b,
+            ) -
+            1;
     final nextTodo = TodoItem.create(
       title: text,
       nodeId: _syncService.nodeId,
       dueAt: _composerDueAt,
       recurrence: _composerRecurrence,
-    );
+    ).copyWith(sortOrder: nextSortOrder);
     _syncService.recordMutation(nextTodo);
     _syncService.notifyPeers();
     setState(() {
@@ -503,11 +520,20 @@ class _LightDoHomePageState extends State<LightDoHomePage>
     }
     final item = activeTodos.removeAt(oldIndex);
     activeTodos.insert(newIndex, item);
+    final reorderedTodos = activeTodos
+        .asMap()
+        .entries
+        .map((entry) => entry.value.copyWith(sortOrder: entry.key))
+        .toList(growable: false);
     final completedTodos = _completedTodos;
 
     setState(() {
-      _todos = [...activeTodos, ...completedTodos];
+      _todos = [...reorderedTodos, ...completedTodos];
     });
+    for (final todo in reorderedTodos) {
+      _syncService.recordMutation(todo);
+    }
+    _syncService.notifyPeers();
     _scheduleSave();
   }
 
@@ -534,13 +560,21 @@ class _LightDoHomePageState extends State<LightDoHomePage>
     }
   }
 
-  List<TodoItem> get _activeTodos => _todos
-      .where((todo) => !todo.isCompleted && !todo.isDeleted)
-      .toList(growable: false);
+  List<TodoItem> get _activeTodos {
+    final todos = _todos
+        .where((todo) => !todo.isCompleted && !todo.isDeleted)
+        .toList(growable: true);
+    todos.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    return todos;
+  }
 
-  List<TodoItem> get _completedTodos => _todos
-      .where((todo) => todo.isCompleted && !todo.isDeleted)
-      .toList(growable: false);
+  List<TodoItem> get _completedTodos {
+    final todos = _todos
+        .where((todo) => todo.isCompleted && !todo.isDeleted)
+        .toList(growable: true);
+    todos.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    return todos;
+  }
 
   bool _containsRecurringInstance(List<TodoItem> todos, TodoItem candidate) {
     return todos.any((todo) {
@@ -687,11 +721,12 @@ class _LightDoHomePageState extends State<LightDoHomePage>
           _SettingsDialog(settings: _settings, syncService: _syncService),
     );
     if (nextSettings == null) return;
+    final wasSyncEnabled = _settings.syncEnabled;
     _updateSettings(nextSettings);
 
     // Android: open scanner if sync just enabled
     if (nextSettings.syncEnabled &&
-        !_settings.syncEnabled &&
+        !wasSyncEnabled &&
         Platform.isAndroid) {
       if (!mounted) return;
       final ctx = context;
