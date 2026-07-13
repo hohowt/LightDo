@@ -19,6 +19,17 @@ void main() {
     expect(next.isCompleted, isFalse);
   });
 
+  test('persists sort order and supports older records without it', () {
+    final todo = TodoItem.create(title: '排序任务').copyWith(sortOrder: 3);
+
+    final restored = TodoItem.fromJson(todo.toJson());
+    final olderJson = todo.toJson()..remove('sortOrder');
+    final older = TodoItem.fromJson(olderJson);
+
+    expect(restored.sortOrder, 3);
+    expect(older.sortOrder, 0);
+  });
+
   test('flashes reminder only within 30 seconds after due time', () {
     final todo = TodoItem.create(
       title: '发送日报',

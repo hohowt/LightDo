@@ -54,6 +54,7 @@ class TodoItem {
     required this.recurrence,
     required this.seriesId,
     this.isDeleted = false,
+    this.sortOrder = 0,
   });
 
   factory TodoItem.create({
@@ -100,6 +101,7 @@ class TodoItem {
       recurrence: recurrence,
       seriesId: json['seriesId'] as String?,
       isDeleted: json['isDeleted'] as bool? ?? false,
+      sortOrder: json['sortOrder'] as int? ?? 0,
     );
   }
 
@@ -114,6 +116,7 @@ class TodoItem {
   final TodoRecurrence recurrence;
   final String? seriesId;
   final bool isDeleted;
+  final int sortOrder;
 
   bool get isRecurring => recurrence != TodoRecurrence.none && dueAt != null;
 
@@ -153,6 +156,7 @@ class TodoItem {
     String? seriesId,
     DateTime? updatedAt,
     bool? isDeleted,
+    int? sortOrder,
   }) {
     final nextDueAt = identical(dueAt, _noChange)
         ? this.dueAt
@@ -172,6 +176,7 @@ class TodoItem {
           ? null
           : (seriesId ?? this.seriesId ?? id),
       isDeleted: isDeleted ?? this.isDeleted,
+      sortOrder: sortOrder ?? this.sortOrder,
     );
   }
 
@@ -218,6 +223,7 @@ class TodoItem {
       'recurrence': recurrence.storageValue,
       'seriesId': seriesId,
       'isDeleted': isDeleted,
+      'sortOrder': sortOrder,
     };
   }
 
