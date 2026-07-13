@@ -26,6 +26,9 @@ class SyncService {
   // Client state (Android)
   WebSocket? _clientSocket;
   StreamSubscription<dynamic>? _clientSub;
+  String? _lastWsUrl;
+  String? _lastToken;
+  bool _intentionalDisconnect = false;
 
   final _todosController = StreamController<List<TodoItem>>.broadcast();
   Stream<List<TodoItem>> get todosStream => _todosController.stream;
@@ -142,6 +145,13 @@ class SyncService {
   // ── Android: WebSocket client ─────────────────────────────────────
 
   Future<void> connectToServer(String wsUrl, String token) async {
+    _intentionalDisconnect = false;
+    _lastWsUrl = wsUrl;
+    _lastToken = token;
+    await _doConnect(wsUrl, token);
+  }
+
+  Future<void> _doConnect(String wsUrl, String token) async {
     await disconnect();
     final uri = Uri.parse(wsUrl).replace(
       queryParameters: {'token': token},
@@ -153,8 +163,21 @@ class SyncService {
       onError: (_) => _onClientDisconnected(),
       cancelOnError: true,
     );
-    // Push local state immediately after connecting
     _clientSocket!.add(_buildPushMessage());
+  }
+
+  /// Call when app returns to foreground to restore dropped connection.
+  Future<void> reconnectIfNeeded() async {
+    if (_intentionalDisconnect) return;
+    if (_clientSocket != null) return;
+    final url = _lastWsUrl;
+    final token = _lastToken;
+    if (url == null || token == null) return;
+    try {
+      await _doConnect(url, token);
+    } catch (_) {
+      // Server may be unreachable; silently ignore, user can re-scan.
+    }
   }
 
   void _handleClientMessage(dynamic data) {
@@ -171,6 +194,9 @@ class SyncService {
   }
 
   Future<void> disconnect() async {
+    _intentionalDisconnect = true;
+    _lastWsUrl = null;
+    _lastToken = null;
     await _clientSocket?.close();
     _onClientDisconnected();
   }
