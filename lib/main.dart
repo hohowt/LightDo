@@ -231,13 +231,6 @@ class _LightDoHomePageState extends State<LightDoHomePage>
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && Platform.isAndroid) {
-      unawaited(_syncService.reconnectIfNeeded());
-    }
-  }
-
   Future<void> _initAll() async {
     // 1. 初始化 SyncService
     final nodeId = await DeviceIdService().getOrCreate();
